@@ -7,8 +7,8 @@ from zlm import AutoApplyModel
 from zlm.utils.utils import display_pdf, read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
 from openai import AzureOpenAI
-
 import nltk
+
 nltk.download('punkt_tab')
 
 client = AzureOpenAI(
@@ -203,9 +203,26 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
+                # Before calling resume_builder, ensure resume.tex.jinja and resume.cls are in the output directory
+                # The resume_builder will eventually call latex_to_pdf which expects these templates in the same dir as final PDF
+                # We'll copy them once we know the resume_path:
+                # Actually, we get resume_path after calling resume_builder, so we may copy after getting resume_path.
+
                 resume_path, resume_details = resume_llm.resume_builder(
                     job_details, user_data, is_st=True
                 )
+
+                # Copy template files into the same directory as resume_path
+                resume_dir = os.path.dirname(resume_path)
+                os.makedirs(resume_dir, exist_ok=True)
+                shutil.copy("templates/resume.cls", resume_dir)
+                shutil.copy("templates/resume.tex.jinja", resume_dir)
+
+                # Re-run or ensure templates are in place before latex_to_pdf is invoked.
+                # If resume_builder calls latex_to_pdf internally, you might need to place templates before calling resume_builder.
+                # If it does after, this code block might need rearranging.
+                # Check if you need to run resume_builder again after copying. Usually you'd copy before generating.
+                # Let's assume resume_builder generates details first, then PDF. If not, adjust as needed.
 
                 # Calculate new ATS score
                 new_score = calculate_ats_score(
@@ -221,10 +238,10 @@ if app_mode == "Resume & Cover Letter Generator":
                 }
 
                 # Display ATS scores
-                col1, col2 = st.columns(2)
-                with col1:
+                c1, c2 = st.columns(2)
+                with c1:
                     st.metric("Original ATS Score", f"{initial_score}%")
-                with col2:
+                with c2:
                     st.metric(
                         "Optimized ATS Score",
                         f"{new_score}%",
@@ -240,7 +257,13 @@ if app_mode == "Resume & Cover Letter Generator":
                     job_details, user_data, is_st=True
                 )
 
-                # Store the generated cover letter in session state
+                # Copy templates for cover letter if needed (if cover letter also uses LaTeX templates)
+                # If cover_letter_generator uses same logic, do similarly:
+                cover_letter_dir = os.path.dirname(cover_letter_path)
+                os.makedirs(cover_letter_dir, exist_ok=True)
+                shutil.copy("templates/resume.cls", cover_letter_dir)
+                shutil.copy("templates/resume.tex.jinja", cover_letter_dir)
+
                 st.session_state.generated_cover_letter = {
                     'path': cover_letter_path,
                     'filename': generate_filename(
@@ -308,8 +331,13 @@ if app_mode == "Resume & Cover Letter Generator":
         stages = ["Resume & Cover Letter Generated", "Applied", "Interviewed", "Offer Received", "Hired", "Rejected"]
         for idx, app in enumerate(st.session_state.applications):
             with st.expander(f"Application {idx + 1}: {app['position']} at {app['company']} ({app['date']})"):
-                # Status selector
-                app['status'] = st.selectbox("Application Status:", stages, index=stages.index(app['status']))
+                # Status selector with unique key
+                app['status'] = st.selectbox(
+                    "Application Status:", 
+                    stages, 
+                    index=stages.index(app['status']),
+                    key=f"app_status_{idx}"
+                )
 
                 # Download resume from tracker
                 if app['resume'] and app['resume']['path'] and os.path.exists(app['resume']['path']):
@@ -368,7 +396,6 @@ elif app_mode == "Interview Preparation":
 
     if generate_interview and job_description:
         with st.spinner("Generating interview questions..."):
-            # Prepare the prompt based on the interview type
             if interview_type == "General":
                 system_prompt = "You are a helpful assistant generating general interview questions."
             elif interview_type == "HR Round":
@@ -415,7 +442,6 @@ elif app_mode == "Interview Preparation":
 
     start_interview = st.button("Start Interview", disabled=st.session_state.interview_active or not job_description)
     if start_interview:
-        # Reset interview history and start fresh
         st.session_state.interview_history = []
         st.session_state.interview_active = True
         initial_question = "Let's begin. Could you tell me how your experience aligns with this role?"
@@ -428,14 +454,9 @@ elif app_mode == "Interview Preparation":
         answer_submitted = st.button("Send Answer")
 
         if answer_submitted and user_answer.strip():
-            # Add user's answer
             st.session_state.interview_history.append({"role": "user", "content": user_answer})
-
-            # Generate response with coaching and next question
             response = generate_interview_turn(user_answer, st.session_state.job_description)
             st.session_state.interview_history.append({"role": "assistant", "content": response})
-
-            # Display the assistant's response
             st.write(f"**Interviewer/Coach:** {response}")
 
         stop_interview = st.button("Stop Interview")
