@@ -2,6 +2,5 @@ streamlit
 openai
 zlm
 nltk
-texlive-full
-poppler-utils
+
 
