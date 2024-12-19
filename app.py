@@ -9,13 +9,11 @@ from zlm.utils.utils import read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
 from openai import AzureOpenAI
 
-# Ensure NLTK data is available
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# Azure OpenAI configuration from Streamlit secrets
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
     api_version="2023-03-15-preview",
@@ -55,16 +53,15 @@ def interview_system_prompt(user_data, job_details):
         f"Job Description:\n{json.dumps(job_details, indent=2)}\n\n"
         f"Candidate Resume Data:\n{json.dumps(user_data, indent=2)}\n\n"
         "Your Role:\n"
-        "1. Ask one challenging, context-specific interview question at a time, leveraging the job requirements and candidate's experience.\n"
-        "2. After the candidate responds, provide constructive, personalized feedback focusing on their answer, guiding improvements and highlighting strengths.\n"
-        "3. Then ask the next question, each time going deeper, ensuring the candidate is truly prepared.\n"
-        "Be professional, encouraging, yet challenging. Keep questions highly relevant, referencing details from the resume and the job description."
+        "1. Ask one challenging, context-specific interview question at a time, leveraging the provided job description and candidate's resume data.\n"
+        "2. After the candidate responds, provide constructive, personalized feedback focusing on their specific answer, guiding improvements and highlighting strengths.\n"
+        "3. Then ask the next question, going deeper each time, ensuring the candidate becomes truly prepared.\n"
+        "Do not ask the user to provide the job description or resume again, as you already have it.\n"
+        "Be professional, encouraging, yet challenging, and always reference details from the provided resume and job description."
     )
 
 def generate_interview_turn(user_message, job_description, user_data, job_details):
     messages = [{"role": "system", "content": interview_system_prompt(user_data, job_details)}]
-    if job_description:
-        messages.append({"role": "system", "content": f"Additional Job Description:\n{job_description}"})
     messages.extend(st.session_state.interview_history)
     messages.append({"role": "user", "content": user_message})
     response = client.chat.completions.create(
@@ -105,8 +102,7 @@ app_mode = st.sidebar.selectbox("Choose the app mode", ["Resume & Cover Letter G
 
 if app_mode == "Resume & Cover Letter Generator":
     st.header("📑 Job-Aligned Resume & Cover Letter with ATS Score Enhancement")
-    st.write("Empower your job application process: Upload your resume (PDF) and job description. We'll analyze it, suggest JSON-based improvements for your resume, generate a cover letter draft, and show you how your ATS score improves.")
-
+    st.write("Upload your resume (PDF) and job description. We'll analyze it, give JSON-based improvement suggestions for your resume, a cover letter draft, and show you how your ATS score improves.")
     job_description_input = st.text_area("Paste Job Description:", max_chars=5500, height=200, placeholder="Paste the job description here...")
     resume_file = st.file_uploader("Upload your Resume (PDF):", type=["pdf"])
 
@@ -131,7 +127,7 @@ if app_mode == "Resume & Cover Letter Generator":
         remove_directory("uploads")
 
         if user_data is None:
-            st.error("Unable to extract data from the uploaded PDF resume. Please try again with a valid resume.")
+            st.error("Could not extract data from the uploaded PDF resume. Please try again with a valid resume.")
             st.stop()
 
         with st.spinner("Extracting job details..."):
@@ -154,11 +150,11 @@ if app_mode == "Resume & Cover Letter Generator":
         c2.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
 
         st.subheader("📝 Optimized Resume Suggestions (JSON)")
-        st.write("Below is the optimized resume data in JSON format. You can copy and adapt it into your own resume template:")
+        st.write("Below is the optimized resume data in JSON format. Copy and adapt it into your resume template:")
         st.json(resume_details)
 
         st.subheader("✍️ Cover Letter Draft")
-        st.write("A suggested cover letter draft is provided below. You can copy it and refine it before sending it out:")
+        st.write("A suggested cover letter draft is provided below. Copy and refine it as needed:")
         st.text_area("Copy-Paste Your Cover Letter:", value=cover_letter_details, height=300)
 
         application_entry = {
@@ -171,7 +167,7 @@ if app_mode == "Resume & Cover Letter Generator":
         }
         st.session_state.applications.append(application_entry)
 
-        st.success("Optimized resume, cover letter generated, and ATS Score improved!")
+        st.success("Optimized resume and cover letter generated. ATS Score improved! You can now navigate to 'Interview Preparation' to use these details.")
 
     if st.session_state.applications:
         st.subheader("📜 Job Application Tracker")
@@ -192,25 +188,28 @@ if app_mode == "Resume & Cover Letter Generator":
 
 elif app_mode == "Interview Preparation":
     st.header("🎤 AI Interview Preparation")
-    st.write("Leverage your resume and job description to get challenging, context-aware interview questions. After each answer, you'll get feedback and the next question, helping you improve step-by-step.")
+    st.write("We have your job description and resume data from the previous step. Let's create context-aware interview questions and provide an interactive coaching session. Once done with the resume step, do not reload the page; simply navigate here.")
 
-    if st.session_state.job_details and st.session_state.user_data and st.session_state.job_description:
-        st.write("We have the job description and your resume data ready. Let's enhance your interview readiness!")
-    else:
-        st.warning("No job description and resume data found. Please generate them in the 'Resume & Cover Letter Generator' first.")
+    if not (st.session_state.job_details and st.session_state.user_data and st.session_state.job_description):
+        st.warning("No job description and resume data found in the current session. Please go back to 'Resume & Cover Letter Generator', generate them, and then directly switch to this page without reloading.")
         st.stop()
 
+    st.write("Your resume and job description are loaded. Let's enhance your interview readiness!")
     interview_type = st.selectbox("Select Interview Type:", ["General", "HR Round", "Technical Round", "Behavioral Round"])
     generate_interview_button = st.button("Generate Initial Interview Questions")
 
     if generate_interview_button:
         with st.spinner("Generating initial interview questions..."):
-            system_prompt = f"You are a helpful assistant generating {interview_type} interview questions tailored to the job description."
+            system_prompt = (
+                f"You are a helpful assistant generating {interview_type} interview questions.\n"
+                "You already have the job description and candidate resume data. Do not ask the user for them again.\n"
+                "Generate 5 interview questions specifically aligned with the job description and candidate's experience."
+            )
             response = client.chat.completions.create(
                 model=AZURE_OPENAI_DEPLOYMENT_NAME,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Generate 5 {interview_type} interview questions specifically aligned with the provided job description."}
+                    {"role": "user", "content": f"Job Description:\n{st.session_state.job_description}\n\nResume Data:\n{json.dumps(st.session_state.user_data, indent=2)}"}
                 ],
                 temperature=0.7,
                 max_tokens=500
@@ -222,7 +221,7 @@ elif app_mode == "Interview Preparation":
 
     st.markdown("---")
     st.subheader("🤝 Interactive Interview & Coaching Session")
-    st.write("Click 'Start Interview' to begin. The system will ask a question referencing your resume and the job description. You respond, then receive feedback and the next question.")
+    st.write("Click 'Start Interview' to begin. The system will ask a question referencing your resume and JD. You respond, then get feedback and the next question. Continue until you feel well-prepared.")
 
     start_interview = st.button("Start Interview", disabled=st.session_state.interview_active or not (st.session_state.job_details and st.session_state.user_data and st.session_state.job_description))
     if start_interview:
@@ -244,20 +243,19 @@ elif app_mode == "Interview Preparation":
         stop_interview = st.button("Stop Interview")
         if stop_interview:
             st.session_state.interview_active = False
-            st.success("Interview session ended.")
+            st.success("Interview session ended. Feel free to revisit the resume and cover letter generator or upcoming features.")
 
 elif app_mode == "Upcoming Features":
     st.header("🚀 Upcoming Features & PDF Generation Explanation")
     st.markdown("""
     - **PDF Generation:** Once environment dependencies are ready, you'll get a polished PDF resume to download.
-    - **Multimodal Integration:** Upload images or other assets. We'll integrate them into ATS scoring and interview prep.
-    - **Advanced Provider Management:** More control over model choices and fallback options.
-    - **Batch Applications:** Manage multiple applications, track statuses, set reminders, and streamline your job search.
+    - **Multimodal Integration:** Upload images or other assets to enhance ATS scoring and interview prep.
+    - **Advanced Provider Management:** More control over model choices and fallback strategies.
+    - **Batch Applications:** Manage multiple applications at scale, track statuses, and set reminders.
     """)
-
-    st.write("Currently, no PDF due to environment restrictions. Once ready, you'll have a fully enhanced PDF resume.")
+    st.write("Currently, no PDF due to environment restrictions. Once available, you'll have a fully enhanced PDF resume.")
     st.subheader("Preview of Multimodal Integration")
-    multimodal_file = st.file_uploader("Upload an image (e.g., portfolio screenshot):", type=["png","jpg","jpeg"])
+    multimodal_file = st.file_uploader("Upload an image (portfolio sample):", type=["png","jpg","jpeg"])
     if multimodal_file:
         st.warning("Not integrated yet. Future feature preview.")
 
