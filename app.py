@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 from openai import AzureOpenAI
 
-# NLTK imports and downloads (do this before Streamlit UI calls)
+# Download NLTK data just once. If done previously, you may comment these out.
 import nltk
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
@@ -20,12 +20,12 @@ st.set_page_config(
     layout="wide",
 )
 
-# Check pdflatex availability
+# Debug: Check pdflatex availability
 st.write("Checking pdflatex availability:")
 pdflatex_version = subprocess.getoutput("pdflatex --version")
 st.write(pdflatex_version)
 
-# Set up Azure OpenAI client
+# Azure OpenAI Configuration
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
     api_version="2023-03-15-preview",
@@ -67,7 +67,7 @@ def interview_system_prompt():
 You know the job description and the company's needs. 
 You will:
 1. Ask the candidate one interview question at a time.
-2. After the candidate responds, provide constructive feedback and coaching tips on their answer.
+2. After the candidate responds, provide constructive feedback and coaching tips.
 3. Then ask the next question.
 Keep the conversation professional, helpful, and structured.
 """
@@ -160,21 +160,26 @@ if app_mode == "Resume & Cover Letter Generator":
             initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
         def ensure_pdf(filepath):
-            # If a .tex file is returned, we compile it to PDF
+            # If a .tex file is returned, compile it to PDF
             if filepath and filepath.endswith(".tex"):
-                st.write("LaTeX file detected, attempting to compile to PDF...")
+                st.write("LaTeX file detected, compiling to PDF...")
                 pdf_path = latex_to_pdf(filepath)
-                st.write("Directory listing after compilation attempt:", os.listdir("output"))
+                st.write("Directory listing after compilation:", os.listdir("output"))
+                # Print .log file if exists
+                log_file = filepath.replace(".tex", ".log")
+                if os.path.exists(log_file):
+                    with open(log_file, 'r') as lf:
+                        st.text_area("LaTeX Log File Content", lf.read(), height=400)
                 if pdf_path and os.path.exists(pdf_path):
                     st.write("PDF successfully generated at:", pdf_path)
                     return pdf_path
                 else:
-                    st.error("Failed to generate PDF from LaTeX. Check LaTeX logs or template compatibility.")
+                    st.error("Failed to generate PDF from LaTeX. Check the log above for errors.")
                     return None
             elif filepath and filepath.endswith(".pdf") and os.path.exists(filepath):
                 return filepath
             else:
-                st.error("No valid .pdf or .tex file returned from resume/cover letter builder.")
+                st.error("No valid .pdf or .tex file returned from the builder.")
                 return None
 
         if generate_resume:
@@ -227,8 +232,6 @@ if app_mode == "Resume & Cover Letter Generator":
 
     if st.session_state.generated_resume or st.session_state.generated_cover_letter:
         st.subheader("Your Generated Documents")
-        from zlm.utils.utils import read_file  # Redundant but ensures scope
-
         if st.session_state.generated_resume:
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
@@ -325,7 +328,7 @@ elif app_mode == "Interview Preparation":
     **Instructions:**
     - Ensure a job description is provided.
     - Click 'Start Interview' to begin an interactive Q&A session.
-    - The system will ask you a question, you respond, and it will provide feedback and ask the next question.
+    - The system will ask you a question, you respond, then it will give feedback and ask the next question.
     - You can stop at any time.
     """)
 
