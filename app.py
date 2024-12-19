@@ -20,7 +20,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Debug: Check pdflatex availability (Optional)
+# Debug: Check pdflatex availability (optional, not strictly needed now)
 st.write("Checking pdflatex availability:")
 pdflatex_version = subprocess.getoutput("pdflatex --version")
 st.write(pdflatex_version)
@@ -160,11 +160,11 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
+                # resume_builder should return a PDF file path
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
                 if not resume_path or not os.path.exists(resume_path):
                     st.error("No resume PDF generated. Please check the logs or try again.")
                 else:
-                    # Display and download resume PDF
                     new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
                     st.session_state.generated_resume = {
                         'path': resume_path,
@@ -179,6 +179,7 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
+                # cover_letter_generator should return a PDF file path
                 cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
                 if not cover_letter_path or not os.path.exists(cover_letter_path):
                     st.error("No cover letter PDF generated. Please check the logs or try again.")
