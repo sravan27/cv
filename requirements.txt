@@ -1,5 +1,4 @@
 streamlit
 openai
-zlm
 nltk
 git+https://github.com/sravan27/verbose-octo-potato.git
