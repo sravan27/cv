@@ -162,6 +162,10 @@ if app_mode == "Resume & Cover Letter Generator":
         download_path = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(download_path, exist_ok=True)
 
+        # Copy templates BEFORE calling resume_builder or cover_letter_generator
+        shutil.copy("templates/resume.cls", download_path)
+        shutil.copy("templates/resume.tex.jinja", download_path)
+
         # Securely access your OpenAI API key
         api_key = st.secrets["OPENAI_API_KEY"]
 
@@ -203,53 +207,40 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
-                # Before calling resume_builder, ensure resume.tex.jinja and resume.cls are in the output directory
-                # The resume_builder will eventually call latex_to_pdf which expects these templates in the same dir as final PDF
-                # We'll copy them once we know the resume_path:
-                # Actually, we get resume_path after calling resume_builder, so we may copy after getting resume_path.
-
                 resume_path, resume_details = resume_llm.resume_builder(
                     job_details, user_data, is_st=True
                 )
 
-                # Copy template files into the same directory as resume_path
-                resume_dir = os.path.dirname(resume_path)
-                os.makedirs(resume_dir, exist_ok=True)
-                shutil.copy("templates/resume.cls", resume_dir)
-                shutil.copy("templates/resume.tex.jinja", resume_dir)
-
-                # Re-run or ensure templates are in place before latex_to_pdf is invoked.
-                # If resume_builder calls latex_to_pdf internally, you might need to place templates before calling resume_builder.
-                # If it does after, this code block might need rearranging.
-                # Check if you need to run resume_builder again after copying. Usually you'd copy before generating.
-                # Let's assume resume_builder generates details first, then PDF. If not, adjust as needed.
-
-                # Calculate new ATS score
-                new_score = calculate_ats_score(
-                    json.dumps(resume_details), json.dumps(job_details)
-                )
-
-                # Store the generated resume in session state
-                st.session_state.generated_resume = {
-                    'path': resume_path,
-                    'filename': generate_filename(
-                        user_name, company, position, "Resume"
-                    ),
-                }
-
-                # Display ATS scores
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.metric("Original ATS Score", f"{initial_score}%")
-                with c2:
-                    st.metric(
-                        "Optimized ATS Score",
-                        f"{new_score}%",
-                        delta=f"{new_score - initial_score}%",
+                # Check if PDF generated
+                if not os.path.exists(resume_path):
+                    st.error("Resume PDF not generated. Check template placement and logs.")
+                else:
+                    # Calculate new ATS score
+                    new_score = calculate_ats_score(
+                        json.dumps(resume_details), json.dumps(job_details)
                     )
 
-                st.success("✅ Resume generated successfully!")
-                new_resume_generated = True
+                    # Store the generated resume in session state
+                    st.session_state.generated_resume = {
+                        'path': resume_path,
+                        'filename': generate_filename(
+                            user_name, company, position, "Resume"
+                        ),
+                    }
+
+                    # Display ATS scores
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.metric("Original ATS Score", f"{initial_score}%")
+                    with c2:
+                        st.metric(
+                            "Optimized ATS Score",
+                            f"{new_score}%",
+                            delta=f"{new_score - initial_score}%",
+                        )
+
+                    st.success("✅ Resume generated successfully!")
+                    new_resume_generated = True
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
@@ -257,23 +248,20 @@ if app_mode == "Resume & Cover Letter Generator":
                     job_details, user_data, is_st=True
                 )
 
-                # Copy templates for cover letter if needed (if cover letter also uses LaTeX templates)
-                # If cover_letter_generator uses same logic, do similarly:
-                cover_letter_dir = os.path.dirname(cover_letter_path)
-                os.makedirs(cover_letter_dir, exist_ok=True)
-                shutil.copy("templates/resume.cls", cover_letter_dir)
-                shutil.copy("templates/resume.tex.jinja", cover_letter_dir)
+                # Check if PDF generated
+                if not os.path.exists(cover_letter_path):
+                    st.error("Cover letter PDF not generated. Check template placement and logs.")
+                else:
+                    st.session_state.generated_cover_letter = {
+                        'path': cover_letter_path,
+                        'filename': generate_filename(
+                            user_name, company, position, "Cover_Letter"
+                        ),
+                        'details': cover_letter_details,
+                    }
 
-                st.session_state.generated_cover_letter = {
-                    'path': cover_letter_path,
-                    'filename': generate_filename(
-                        user_name, company, position, "Cover_Letter"
-                    ),
-                    'details': cover_letter_details,
-                }
-
-                st.success("✅ Cover letter generated successfully!")
-                new_cover_letter_generated = True
+                    st.success("✅ Cover letter generated successfully!")
+                    new_cover_letter_generated = True
 
         # Add application to tracker with a default status
         application_entry = {
