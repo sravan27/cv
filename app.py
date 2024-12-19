@@ -7,7 +7,14 @@ from openai import AzureOpenAI
 import subprocess
 import nltk
 
-# Download NLTK data if needed. Run once and then comment out.
+# Set page config as the first Streamlit command
+st.set_page_config(
+    page_title="AI Resume, Cover Letter Generator & Interview Prep",
+    page_icon="📑",
+    layout="wide",
+)
+
+# If needed, download NLTK data only once, then comment out
 # nltk.download('punkt')
 # nltk.download('stopwords')
 # nltk.download('averaged_perceptron_tagger')
@@ -18,7 +25,6 @@ st.write("Checking pdflatex availability:")
 pdflatex_version = subprocess.getoutput("pdflatex --version")
 st.write(pdflatex_version)
 
-# Azure OpenAI client
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
     api_version="2023-03-15-preview",
@@ -27,9 +33,7 @@ client = AzureOpenAI(
 
 AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
 
-# --- Utility Functions and Definitions ---
 def calculate_ats_score(text1, text2):
-    # Import metrics here to avoid issues on load
     from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
     score = (
         jaccard_similarity(text1, text2) * 0.4
@@ -111,12 +115,6 @@ if 'interview_active' not in st.session_state:
 if 'coaching_mode' not in st.session_state:
     st.session_state.coaching_mode = True
 
-st.set_page_config(
-    page_title="AI Resume, Cover Letter Generator & Interview Prep",
-    page_icon="📑",
-    layout="wide",
-)
-
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox(
     "Choose the app mode",
@@ -124,11 +122,9 @@ app_mode = st.sidebar.selectbox(
 )
 
 if app_mode == "Resume & Cover Letter Generator":
-    # Import here to avoid potential issues at startup
     from zlm import AutoApplyModel
     from zlm.utils.utils import display_pdf, read_file
 
-    # Clean output directory
     remove_directory("output")
 
     st.header("AI Resume & Cover Letter Generator", divider="rainbow")
@@ -184,17 +180,12 @@ if app_mode == "Resume & Cover Letter Generator":
                 resume_file_path, is_st=True
             )
             user_name = extract_user_name(user_data)
-
             job_details, company, position = extract_job_details(
                 job_description, resume_llm
             )
-
             initial_score = calculate_ats_score(
                 json.dumps(user_data), json.dumps(job_details)
             )
-
-        new_resume_generated = False
-        new_cover_letter_generated = False
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
@@ -223,9 +214,7 @@ if app_mode == "Resume & Cover Letter Generator":
                             f"{new_score}%",
                             delta=f"{new_score - initial_score}%",
                         )
-
                     st.success("✅ Resume generated successfully!")
-                    new_resume_generated = True
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
@@ -244,7 +233,6 @@ if app_mode == "Resume & Cover Letter Generator":
                         'details': cover_letter_details,
                     }
                     st.success("✅ Cover letter generated successfully!")
-                    new_cover_letter_generated = True
 
         application_entry = {
             'company': company,
@@ -261,7 +249,6 @@ if app_mode == "Resume & Cover Letter Generator":
 
     if st.session_state.generated_resume or st.session_state.generated_cover_letter:
         st.subheader("Your Generated Documents")
-
         if st.session_state.generated_resume:
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
@@ -334,7 +321,6 @@ if app_mode == "Resume & Cover Letter Generator":
         st.info("No applications tracked yet. Generate a resume or cover letter to start tracking.")
 
 elif app_mode == "Interview Preparation":
-    # Only import these here
     from zlm.utils.utils import read_file, display_pdf
 
     st.header("AI Interview Preparation", divider="rainbow")
