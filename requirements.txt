@@ -2,7 +2,6 @@ streamlit
 openai
 zlm
 nltk
-libasound2
 texlive-latex-base
 texlive-fonts-recommended
 texlive-fonts-extra
