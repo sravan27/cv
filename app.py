@@ -4,7 +4,7 @@ File: app.py
 Creation Time: Jan 30th 2024, 11:00 am
 Author: Saurabh Zinjad
 Developer Email: saurabhzinjad@gmail.com
-Copyright (c) 2023-2024
+Copyright (...)
 -----------------------------------------------------------------------
 '''
 
@@ -15,19 +15,17 @@ import shutil
 import zipfile
 import subprocess
 import streamlit as st
+import nltk
 
 from zlm import AutoApplyModel
-from zlm.utils.utils import display_pdf, download_pdf, read_file, read_json
+from zlm.utils.utils import display_pdf, read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
-from zlm.variables import LLM_MAPPING
 
-import nltk
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# Azure OpenAI Configuration (no user choice)
 from openai import AzureOpenAI
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
@@ -36,81 +34,24 @@ client = AzureOpenAI(
 )
 AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
 
-print("Installing playwright...")
-os.system("playwright install")
-os.system("sudo playwright install-deps")
-
 st.set_page_config(
     page_title="Resume Generator",
     page_icon="📑",
     menu_items={
-        'Get help': 'https://www.youtube.com/watch?v=Agl7ugyu1N4',
+        'Get help': 'https://github.com/Ztrimus/job-llm/issues',
         'About': 'https://github.com/Ztrimus/job-llm',
         'Report a bug': "https://github.com/Ztrimus/job-llm/issues",
     }
 )
 
-# Debug: Check pdflatex availability
 st.write("Checking pdflatex availability:")
 pdflatex_version = subprocess.getoutput("pdflatex --version")
 st.write(pdflatex_version)
 
-if os.path.exists("output"):
-    shutil.rmtree("output")
-
-def encode_tex_file(file_path):
-    try:
-        current_loc = os.path.dirname(__file__)
-        file_paths = [file_path.replace('.pdf', '.tex'), os.path.join(current_loc, 'zlm', 'templates', 'resume.cls')]
-        zip_file_path = file_path.replace('.pdf', '.zip')
-
-        # Create a zip file
-        with zipfile.ZipFile(zip_file_path, 'w') as zipf:
-            for fp in file_paths:
-                if os.path.exists(fp):
-                    zipf.write(fp, os.path.basename(fp))
-
-        # Read the zip file content as bytes
-        if os.path.exists(zip_file_path):
-            with open(zip_file_path, 'rb') as zip_file:
-                zip_content = zip_file.read()
-            # Encode the data using Base64
-            encoded_zip = base64.b64encode(zip_content).decode('utf-8')
-            return encoded_zip
-        else:
-            return None
-    except Exception as e:
-        st.error(f"An error occurred while encoding the file: {e}")
-        return None
-
-def create_overleaf_button(resume_path):
-    tex_content = encode_tex_file(resume_path)
-    if tex_content is None:
-        return
-    html_code = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Overleaf Button</title>
-        <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    </head>
-    <body style="background: transparent;">
-        <div style="max-height: 30px !important;">
-            <form action="https://www.overleaf.com/docs" method="post" target="_blank" height="20px">
-                <input type="text" name="snip_uri" style="display: none;"
-                    value="data:application/zip;base64,{tex_content}">
-                <input class="btn btn-success rounded-pill w-100" type="submit" value="Edit in Overleaf 🍃">
-            </form>
-        </div>
-    </body>
-    </html>
-    """
-    st.components.v1.html(html_code, height=40)
+# Just run playwright install if needed (no sudo)
+os.system("playwright install")
 
 def calculate_ats_score(text1, text2):
-    # As per previous code using jaccard, overlap, cosine
     score = (
         jaccard_similarity(text1, text2) * 0.4
         + overlap_coefficient(text1, text2) * 0.3
@@ -142,11 +83,39 @@ def generate_interview_turn(user_message, job_description):
     )
     return response.choices[0].message.content.strip()
 
-def extract_job_details(job_description, model):
-    job_details = model.job_details_extraction(job_site_content=job_description, is_st=True)[0]
-    company = job_details.get("company_name", "Company")
-    position = job_details.get("job_title", "Position")
-    return job_details, company, position
+def encode_tex_file(file_path):
+    try:
+        tex_file = file_path.replace('.pdf', '.tex')
+        cls_file = os.path.join('output', 'resume.cls')
+        zip_file_path = file_path.replace('.pdf', '.zip')
+        with zipfile.ZipFile(zip_file_path, 'w') as zipf:
+            if os.path.exists(tex_file):
+                zipf.write(tex_file, os.path.basename(tex_file))
+            if os.path.exists(cls_file):
+                zipf.write(cls_file, 'resume.cls')
+        if os.path.exists(zip_file_path):
+            with open(zip_file_path, 'rb') as zip_file:
+                zip_content = zip_file.read()
+            encoded_zip = base64.b64encode(zip_content).decode('utf-8')
+            return encoded_zip
+        else:
+            return None
+    except Exception as e:
+        st.error(f"An error occurred while encoding the file: {e}")
+        return None
+
+def create_overleaf_button(resume_path):
+    tex_content = encode_tex_file(resume_path)
+    if tex_content is None:
+        return
+    html_code = f"""
+    <form action="https://www.overleaf.com/docs" method="post" target="_blank">
+        <input type="text" name="snip_uri" style="display: none;"
+            value="data:application/zip;base64,{tex_content}">
+        <input class="btn btn-success rounded-pill w-100" type="submit" value="Edit in Overleaf 🍃">
+    </form>
+    """
+    st.markdown(html_code, unsafe_allow_html=True)
 
 def extract_user_name(user_data):
     return user_data.get("name", "Candidate")
@@ -163,7 +132,11 @@ def remove_directory(path):
     if os.path.exists(path):
         shutil.rmtree(path)
 
-# Session State
+def extract_job_details(job_description, model):
+    job_details = model.job_details_extraction(job_site_content=job_description, is_st=True)[0]
+    return job_details, job_details.get("company_name","Company"), job_details.get("job_title","Position")
+
+# Initialize Session State
 if 'applications' not in st.session_state:
     st.session_state.applications = []
 if 'generated_resume' not in st.session_state:
@@ -187,26 +160,24 @@ app_mode = st.sidebar.selectbox("Choose the app mode", ["Resume & Cover Letter G
 if app_mode == "Resume & Cover Letter Generator":
     st.header("Get :green[Job Aligned] :orange[Personalized] Resume", divider='rainbow')
 
-    # Remove provider/model selection -> Hardcode provider="GPT" and model="gpt-4o"
-    # Remove URL toggle
-    st.write("Job Description Text")
-    text = st.text_area("Paste job description text:", max_chars=5500, height=200, placeholder="Paste job description text here...")
+    job_description = st.text_area("Paste job description:", max_chars=5500, height=300, placeholder="Paste the job description here...")
+    st.session_state.job_description = job_description
 
-    file = st.file_uploader("Upload your resume or any work-related data(PDF, JSON)", type=["json", "pdf"])
+    resume_file = st.file_uploader("Upload your current resume (PDF/JSON)", type=["pdf", "json"])
 
-    colb1, colb2, colb3 = st.columns(3)
-    with colb1:
-        get_resume_button = st.button("Get Resume", key="get_resume", type="primary", use_container_width=True)
-    with colb2:
-        get_cover_letter_button = st.button("Get Cover Letter", key="get_cover_letter", type="primary", use_container_width=True)
-    with colb3:
-        get_both = st.button("Resume + Cover letter", key="both", type="primary", use_container_width=True)
-        if get_both:
-            get_resume_button = True
-            get_cover_letter_button = True
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        generate_resume = st.button("Get Resume", type="primary", use_container_width=True)
+    with col2:
+        generate_cover_letter = st.button("Get Cover Letter", type="primary", use_container_width=True)
+    with col3:
+        generate_both = st.button("Resume + Cover letter", type="primary", use_container_width=True)
+        if generate_both:
+            generate_resume = True
+            generate_cover_letter = True
 
-    if (get_resume_button or get_cover_letter_button) and file and text:
-        # Hardcode model and provider
+    if (generate_resume or generate_cover_letter) and job_description and resume_file:
+        # Use Azure OpenAI + GPT-4o
         api_key = st.secrets["OPENAI_API_KEY"]
         resume_llm = AutoApplyModel(
             api_key=api_key,
@@ -215,134 +186,85 @@ if app_mode == "Resume & Cover Letter Generator":
             downloads_dir="output"
         )
 
-        # Save the uploaded file
+        # Save user resume
         os.makedirs("uploads", exist_ok=True)
-        file_path = os.path.abspath(os.path.join("uploads", file.name))
-        with open(file_path, "wb") as f:
-            f.write(file.getbuffer())
-    
-        # Extract user data
-        with st.status("Extracting user data..."):
-            user_data = resume_llm.user_data_extraction(file_path, is_st=True)
-            st.write(user_data)
-
-        shutil.rmtree(os.path.dirname(file_path))
-
-        if user_data is None:
-            st.error("User data not able to process. Please upload a valid file")
-            st.stop()
-
-        # Extract job details
-        with st.status("Extracting job details..."):
-            job_details, jd_path = resume_llm.job_details_extraction(job_site_content=text, is_st=True)
-            st.write(job_details)
-
-        if job_details is None:
-            st.error("Please paste job description text and try again!")
-            st.stop()
-
-        user_name = extract_user_name(user_data)
-        company = job_details.get("company_name", "Company")
-        position = job_details.get("job_title", "Position")
+        resume_file_path = os.path.join("uploads", resume_file.name)
+        with open(resume_file_path, "wb") as f:
+            f.write(resume_file.getbuffer())
 
         remove_directory("output")
         os.makedirs("output", exist_ok=True)
         shutil.copy("templates/resume.cls", "output")
         shutil.copy("templates/resume.tex.jinja", "output")
 
-        initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
+        with st.spinner("Analyzing your resume and job description..."):
+            user_data = resume_llm.user_data_extraction(resume_file_path, is_st=True)
+            user_name = extract_user_name(user_data)
+            job_details, company, position = extract_job_details(job_description, resume_llm)
+            initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
-        # Build Resume
-        if get_resume_button:
-            with st.status("Building resume..."):
+        # Change to output directory so all generated files go here
+        original_cwd = os.getcwd()
+        os.chdir("output")
+
+        if generate_resume:
+            with st.spinner("Generating optimized resume..."):
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
-
-            resume_col_1, resume_col_2, resume_col_3 = st.columns([0.35, 0.3, 0.25])
-            with resume_col_1:
-                st.subheader("Generated Resume")
-            with resume_col_2:
+            # Return to original directory for reading
+            os.chdir(original_cwd)
+            if not resume_path or not os.path.exists(resume_path):
+                st.error("No resume PDF generated. Please check logs or try again.")
+            else:
+                new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
+                st.session_state.generated_resume = {
+                    'path': resume_path,
+                    'filename': generate_filename(user_name, company, position, "Resume"),
+                }
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Original ATS Score", f"{initial_score}%")
+                with c2:
+                    st.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
+                st.success("✅ Resume generated successfully!")
                 pdf_data = read_file(resume_path, "rb")
-                st.download_button(label="Download Resume ⬇",
-                                   data=pdf_data,
-                                   file_name=os.path.basename(resume_path),
-                                   mime="application/pdf",
-                                   use_container_width=True)
-            with resume_col_3:
-                # Overleaf button
+                st.download_button("Download Resume ⬇", data=pdf_data, file_name=st.session_state.generated_resume['filename'], mime="application/pdf")
+                display_pdf(resume_path, type="image")
                 create_overleaf_button(resume_path)
+                os.chdir("output")
 
-            display_pdf(resume_path, type="image")
-            st.toast("Resume generated successfully!", icon="✅")
-
-            new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
-            st.subheader("Resume Metrics")
-            # Using overlap_coefficient and cosine_similarity
-            for metric in ['overlap_coefficient', 'cosine_similarity']:
-                user_personalization = globals()[metric](json.dumps(resume_details), json.dumps(user_data))
-                job_alignment = globals()[metric](json.dumps(resume_details), json.dumps(job_details))
-                job_match = globals()[metric](json.dumps(user_data), json.dumps(job_details))
-
-                if metric == "overlap_coefficient":
-                    title = "Token Space"
-                    help_text = "Token space compares texts by exact tokens..."
-                elif metric == "cosine_similarity":
-                    title = "Latent Space"
-                    help_text = "Latent space looks at meaning..."
-
-                st.caption(f"## **:rainbow[{title}]**", help=help_text)
-                col_m_1, col_m_2, col_m_3 = st.columns(3)
-                col_m_1.metric(label=":green[User Personalization Score]", value=f"{user_personalization:.3f}", delta="(new resume, old resume)", delta_color="off")
-                col_m_2.metric(label=":blue[Job Alignment Score]", value=f"{job_alignment:.3f}", delta="(new resume, job details)", delta_color="off")
-                col_m_3.metric(label=":violet[Job Match Score]", value=f"{job_match:.3f}", delta="[old resume, job details]", delta_color="off")
-            st.markdown("---")
-
-            st.session_state.generated_resume = {
-                'path': resume_path,
-                'filename': generate_filename(user_name, company, position, "Resume"),
-            }
-
-        # Build Cover Letter
-        if get_cover_letter_button:
-            with st.status("Building cover letter..."):
+        if generate_cover_letter:
+            with st.spinner("Generating cover letter..."):
                 cv_details, cv_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
-
-            cv_col_1, cv_col_2 = st.columns([0.7, 0.3])
-            with cv_col_1:
-                st.subheader("Generated Cover Letter")
-            with cv_col_2:
+            os.chdir(original_cwd)
+            if not cv_path or not os.path.exists(cv_path):
+                st.error("No cover letter PDF generated. Please check logs or try again.")
+            else:
+                st.session_state.generated_cover_letter = {
+                    'path': cv_path,
+                    'filename': generate_filename(user_name, company, position, "Cover_Letter"),
+                    'details': cv_details,
+                }
+                st.success("✅ Cover letter generated successfully!")
                 cv_data = read_file(cv_path, "rb")
-                st.download_button(label="Download CV ⬇",
-                                   data=cv_data,
-                                   file_name=os.path.basename(cv_path),
-                                   mime="application/pdf", 
-                                   use_container_width=True)
-            st.markdown(cv_details, unsafe_allow_html=True)
-            st.markdown("---")
-            st.toast("Cover letter generated successfully!", icon="✅")
+                st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=st.session_state.generated_cover_letter['filename'], mime="application/pdf")
+                st.markdown(cv_details, unsafe_allow_html=True)
+                os.chdir("output")
 
-            st.session_state.generated_cover_letter = {
-                'path': cv_path,
-                'filename': generate_filename(user_name, company, position, "Cover_Letter"),
-                'details': cv_details,
-            }
-
-        st.toast("Done", icon="👍🏻")
-        st.success("Done", icon="👍🏻")
-        st.balloons()
+        # Return to original directory
+        os.chdir(original_cwd)
 
         application_entry = {
             'company': company,
             'position': position,
-            'date': job_details.get("extraction_date", ""),
+            'date': json.dumps(job_details.get("extraction_date", "")),
             'resume': st.session_state.generated_resume,
             'cover_letter': st.session_state.generated_cover_letter,
             'status': "Resume & Cover Letter Generated"
         }
         st.session_state.applications.append(application_entry)
 
-        refresh = st.button("Refresh")
-        if refresh:
-            st.experimental_rerun()
+        remove_directory("uploads")
+        st.balloons()
 
     if st.session_state.applications:
         st.subheader("Job Application Tracker")
@@ -452,4 +374,4 @@ except Exception as e:
     st.error(f"An unexpected error occurred: {e}")
     st.stop()
 
-st.link_button("Report Feedback, Issues, or Contribute!", "https://github.com/Ztrimus/job-llm/issues", use_container_width=True)
+st.markdown("[Report Feedback, Issues, or Contribute!](https://github.com/Ztrimus/job-llm/issues)")
