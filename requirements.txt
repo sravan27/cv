@@ -3,4 +3,4 @@ openai
 nltk
 zlm
 pdf2image
-
+jinja2
