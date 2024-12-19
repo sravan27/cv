@@ -1,4 +1,3 @@
-# packages.txt
 texlive-latex-extra
 texlive-latex-recommended
 poppler-utils
