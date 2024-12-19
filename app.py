@@ -7,20 +7,12 @@ from openai import AzureOpenAI
 import subprocess
 import nltk
 
-nltk.download('punkt_tab')
-
-# Set page config as the first Streamlit command
+# Set page config as first Streamlit command
 st.set_page_config(
     page_title="AI Resume, Cover Letter Generator & Interview Prep",
     page_icon="📑",
     layout="wide",
 )
-
-# If needed, download NLTK data only once, then comment out
-# nltk.download('punkt')
-# nltk.download('stopwords')
-# nltk.download('averaged_perceptron_tagger')
-# nltk.download('punkt_tab')
 
 # Print pdflatex version for debugging
 st.write("Checking pdflatex availability:")
@@ -32,7 +24,6 @@ client = AzureOpenAI(
     api_version="2023-03-15-preview",
     api_key=st.secrets["AZURE_OPENAI_API_KEY"]
 )
-
 AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
 
 def calculate_ats_score(text1, text2):
@@ -78,38 +69,29 @@ Keep the conversation professional, helpful, and structured.
 
 def generate_interview_turn(user_message, job_description):
     messages = [{"role": "system", "content": interview_system_prompt()}]
-
     if job_description:
         messages.append({"role": "system", "content": f"Job Description:\n{job_description}"})
-
     messages.extend(st.session_state.interview_history)
     messages.append({"role": "user", "content": user_message})
-
     response = client.chat.completions.create(
         model=AZURE_OPENAI_DEPLOYMENT_NAME,
         messages=messages,
         temperature=0.7,
         max_tokens=500
     )
-
     return response.choices[0].message.content.strip()
 
-# --- Initialize Session State ---
+# Initialize Session State
 if 'applications' not in st.session_state:
     st.session_state.applications = []
-
 if 'generated_resume' not in st.session_state:
     st.session_state.generated_resume = None
-
 if 'generated_cover_letter' not in st.session_state:
     st.session_state.generated_cover_letter = None
-
 if 'interview_questions' not in st.session_state:
     st.session_state.interview_questions = ""
-
 if 'job_description' not in st.session_state:
     st.session_state.job_description = ""
-
 if 'interview_history' not in st.session_state:
     st.session_state.interview_history = []
 if 'interview_active' not in st.session_state:
@@ -126,8 +108,14 @@ app_mode = st.sidebar.selectbox(
 if app_mode == "Resume & Cover Letter Generator":
     from zlm import AutoApplyModel
     from zlm.utils.utils import display_pdf, read_file
+    from zlm.utils.latex_ops import latex_to_pdf
 
+    # Ensure output directory exists
+    os.makedirs("output", exist_ok=True)
+
+    # Clear output directory if needed
     remove_directory("output")
+    os.makedirs("output", exist_ok=True)
 
     st.header("AI Resume & Cover Letter Generator", divider="rainbow")
 
@@ -154,20 +142,12 @@ if app_mode == "Resume & Cover Letter Generator":
         )
 
     if (generate_resume or generate_cover_letter) and job_description and resume_file:
-        download_path = os.path.join(os.path.dirname(__file__), "output")
-        os.makedirs(download_path, exist_ok=True)
-
-        # Copy templates BEFORE generating PDFs
-        shutil.copy("templates/resume.cls", download_path)
-        shutil.copy("templates/resume.tex.jinja", download_path)
-
         api_key = st.secrets["OPENAI_API_KEY"]
-
         resume_llm = AutoApplyModel(
             api_key=api_key,
             provider="GPT",
             model="gpt-4o",
-            downloads_dir=download_path,
+            downloads_dir="output",  # point to the known output folder
         )
 
         os.makedirs("uploads", exist_ok=True)
@@ -177,64 +157,68 @@ if app_mode == "Resume & Cover Letter Generator":
         with open(resume_file_path, "wb") as f:
             f.write(resume_file.getbuffer())
 
+        # Copy templates before generation
+        shutil.copy("templates/resume.cls", "output")
+        shutil.copy("templates/resume.tex.jinja", "output")
+
         with st.spinner("Analyzing your resume and job description..."):
-            user_data = resume_llm.user_data_extraction(
-                resume_file_path, is_st=True
-            )
+            user_data = resume_llm.user_data_extraction(resume_file_path, is_st=True)
             user_name = extract_user_name(user_data)
-            job_details, company, position = extract_job_details(
-                job_description, resume_llm
-            )
-            initial_score = calculate_ats_score(
-                json.dumps(user_data), json.dumps(job_details)
-            )
+            job_details, company, position = extract_job_details(job_description, resume_llm)
+            initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
-                resume_path, resume_details = resume_llm.resume_builder(
-                    job_details, user_data, is_st=True
-                )
+                resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
                 st.write("Resume generated at:", resume_path)
-                if not os.path.exists(resume_path):
-                    st.error("Resume PDF not generated. Check LaTeX logs if accessible.")
-                else:
-                    new_score = calculate_ats_score(
-                        json.dumps(resume_details), json.dumps(job_details)
-                    )
+
+                # If resume_path is .tex, compile it to PDF
+                if resume_path.endswith(".tex"):
+                    pdf_path = latex_to_pdf(resume_path)
+                    if pdf_path and os.path.exists(pdf_path):
+                        resume_path = pdf_path
+                    else:
+                        st.error("Failed to generate PDF from LaTeX.")
+                        resume_path = None
+
+                if resume_path and resume_path.endswith(".pdf") and os.path.exists(resume_path):
+                    new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
                     st.session_state.generated_resume = {
                         'path': resume_path,
-                        'filename': generate_filename(
-                            user_name, company, position, "Resume"
-                        ),
+                        'filename': generate_filename(user_name, company, position, "Resume"),
                     }
                     c1, c2 = st.columns(2)
                     with c1:
                         st.metric("Original ATS Score", f"{initial_score}%")
                     with c2:
-                        st.metric(
-                            "Optimized ATS Score",
-                            f"{new_score}%",
-                            delta=f"{new_score - initial_score}%",
-                        )
+                        st.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
                     st.success("✅ Resume generated successfully!")
+                else:
+                    st.error("No resume PDF found after generation.")
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
-                cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(
-                    job_details, user_data, is_st=True
-                )
+                cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
                 st.write("Cover letter generated at:", cover_letter_path)
-                if not os.path.exists(cover_letter_path):
-                    st.error("Cover letter PDF not generated.")
-                else:
+
+                # If cover_letter_path is .tex, compile it to PDF
+                if cover_letter_path.endswith(".tex"):
+                    pdf_path = latex_to_pdf(cover_letter_path)
+                    if pdf_path and os.path.exists(pdf_path):
+                        cover_letter_path = pdf_path
+                    else:
+                        st.error("Failed to generate PDF from LaTeX (cover letter).")
+                        cover_letter_path = None
+
+                if cover_letter_path and cover_letter_path.endswith(".pdf") and os.path.exists(cover_letter_path):
                     st.session_state.generated_cover_letter = {
                         'path': cover_letter_path,
-                        'filename': generate_filename(
-                            user_name, company, position, "Cover_Letter"
-                        ),
+                        'filename': generate_filename(user_name, company, position, "Cover_Letter"),
                         'details': cover_letter_details,
                     }
                     st.success("✅ Cover letter generated successfully!")
+                else:
+                    st.error("No cover letter PDF found after generation.")
 
         application_entry = {
             'company': company,
@@ -256,12 +240,7 @@ if app_mode == "Resume & Cover Letter Generator":
             st.write(f"**Resume:** {resume_info['filename']}")
             if resume_info['path'] and os.path.exists(resume_info['path']):
                 pdf_data = read_file(resume_info['path'], "rb")
-                st.download_button(
-                    "Download Resume ⬇",
-                    data=pdf_data,
-                    file_name=resume_info['filename'],
-                    mime="application/pdf",
-                )
+                st.download_button("Download Resume ⬇", data=pdf_data, file_name=resume_info['filename'], mime="application/pdf")
                 display_pdf(resume_info['path'], type="image")
             else:
                 st.error("Resume file not found. Please try again.")
@@ -271,12 +250,7 @@ if app_mode == "Resume & Cover Letter Generator":
             st.write(f"**Cover Letter:** {cover_letter_info['filename']}")
             if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
                 cv_data = read_file(cover_letter_info['path'], "rb")
-                st.download_button(
-                    "Download Cover Letter ⬇",
-                    data=cv_data,
-                    file_name=cover_letter_info['filename'],
-                    mime="application/pdf",
-                )
+                st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=cover_letter_info['filename'], mime="application/pdf")
                 st.markdown(cover_letter_info['details'], unsafe_allow_html=True)
             else:
                 st.error("Cover letter file not found. Please try again.")
@@ -286,36 +260,19 @@ if app_mode == "Resume & Cover Letter Generator":
         stages = ["Resume & Cover Letter Generated", "Applied", "Interviewed", "Offer Received", "Hired", "Rejected"]
         for idx, app in enumerate(st.session_state.applications):
             with st.expander(f"Application {idx + 1}: {app['position']} at {app['company']} ({app['date']})"):
-                app['status'] = st.selectbox(
-                    "Application Status:", 
-                    stages, 
-                    index=stages.index(app['status']),
-                    key=f"app_status_{idx}"
-                )
+                app['status'] = st.selectbox("Application Status:", stages, index=stages.index(app['status']), key=f"app_status_{idx}")
 
                 if app['resume'] and app['resume']['path'] and os.path.exists(app['resume']['path']):
                     resume_info = app['resume']
                     pdf_data = read_file(resume_info['path'], "rb")
-                    st.download_button(
-                        "Download Resume ⬇",
-                        data=pdf_data,
-                        file_name=resume_info['filename'],
-                        mime="application/pdf",
-                        key=f"resume_download_{idx}"
-                    )
+                    st.download_button("Download Resume ⬇", data=pdf_data, file_name=resume_info['filename'], mime="application/pdf", key=f"resume_download_{idx}")
                 else:
                     st.info("Resume file not available.")
 
                 if app['cover_letter'] and app['cover_letter']['path'] and os.path.exists(app['cover_letter']['path']):
                     cover_letter_info = app['cover_letter']
                     cv_data = read_file(cover_letter_info['path'], "rb")
-                    st.download_button(
-                        "Download Cover Letter ⬇",
-                        data=cv_data,
-                        file_name=cover_letter_info['filename'],
-                        mime="application/pdf",
-                        key=f"cover_letter_download_{idx}"
-                    )
+                    st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=cover_letter_info['filename'], mime="application/pdf", key=f"cover_letter_download_{idx}")
                 else:
                     st.info("Cover letter file not available.")
 
