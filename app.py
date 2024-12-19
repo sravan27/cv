@@ -9,6 +9,9 @@ from zlm import AutoApplyModel
 from zlm.utils.utils import display_pdf, read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
 from openai import AzureOpenAI
+import nltk
+nltk.download('punkt_tab')
+
 
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
