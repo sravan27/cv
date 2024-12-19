@@ -9,9 +9,6 @@ from zlm import AutoApplyModel
 from zlm.utils.utils import display_pdf, read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
 from openai import AzureOpenAI
-import nltk
-nltk.download('punkt_tab')
-
 
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
@@ -20,6 +17,7 @@ client = AzureOpenAI(
 )
 
 # --- Utility Functions and Definitions ---
+
 def calculate_ats_score(text1, text2):
     """Calculate ATS match score using multiple metrics."""
     score = (
@@ -152,10 +150,11 @@ if app_mode == "Resume & Cover Letter Generator":
         generate_cover_letter = st.button("Generate Cover Letter", type="primary", use_container_width=True)
 
     if (generate_resume or generate_cover_letter) and job_description and resume_file:
+        # Ensure we have a writable output directory
         download_path = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(download_path, exist_ok=True)
 
-        # Copy resume.cls into download_path so latex_to_pdf can find it
+        # Copy resume.cls to the output directory to ensure it's writable and accessible
         templates_dir = os.path.join(os.path.dirname(__file__), "templates")
         shutil.copy(os.path.join(templates_dir, "resume.cls"), download_path)
 
@@ -164,7 +163,7 @@ if app_mode == "Resume & Cover Letter Generator":
             api_key=api_key,
             provider="GPT",
             model="gpt-4o",
-            downloads_dir=download_path,
+            downloads_dir=download_path
         )
 
         # Process the uploaded resume file
@@ -176,7 +175,6 @@ if app_mode == "Resume & Cover Letter Generator":
         with st.spinner("Analyzing your resume and job description..."):
             user_data = resume_llm.user_data_extraction(resume_file_path, is_st=True)
             user_name = extract_user_name(user_data)
-
             job_details, company, position = extract_job_details(job_description, resume_llm)
             initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
@@ -185,6 +183,7 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
+                # This should now generate files in the download_path directory
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
 
                 new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
@@ -234,16 +233,22 @@ if app_mode == "Resume & Cover Letter Generator":
         if st.session_state.generated_resume:
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
-            pdf_data = read_file(resume_info['path'], "rb")
-            st.download_button("Download Resume ⬇", data=pdf_data, file_name=resume_info['filename'], mime="application/pdf")
-            display_pdf(resume_info['path'], type="image")
+            if resume_info['path'] and os.path.exists(resume_info['path']):
+                pdf_data = read_file(resume_info['path'], "rb")
+                st.download_button("Download Resume ⬇", data=pdf_data, file_name=resume_info['filename'], mime="application/pdf")
+                display_pdf(resume_info['path'], type="image")
+            else:
+                st.error("Resume file not found. Please try again.")
 
         if st.session_state.generated_cover_letter:
             cover_letter_info = st.session_state.generated_cover_letter
             st.write(f"**Cover Letter:** {cover_letter_info['filename']}")
-            cv_data = read_file(cover_letter_info['path'], "rb")
-            st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=cover_letter_info['filename'], mime="application/pdf")
-            st.markdown(cover_letter_info['details'], unsafe_allow_html=True)
+            if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
+                cv_data = read_file(cover_letter_info['path'], "rb")
+                st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=cover_letter_info['filename'], mime="application/pdf")
+                st.markdown(cover_letter_info['details'], unsafe_allow_html=True)
+            else:
+                st.error("Cover Letter file not found. Please try again.")
 
     # Display Job Application Tracker
     if st.session_state.applications:
@@ -252,24 +257,30 @@ if app_mode == "Resume & Cover Letter Generator":
             with st.expander(f"Application {idx + 1}: {app['position']} at {app['company']} ({app['date']})"):
                 if app['resume']:
                     resume_info = app['resume']
-                    pdf_data = read_file(resume_info['path'], "rb")
-                    st.download_button(
-                        "Download Resume ⬇",
-                        data=pdf_data,
-                        file_name=resume_info['filename'],
-                        mime="application/pdf",
-                        key=f"resume_download_{idx}"
-                    )
+                    if resume_info['path'] and os.path.exists(resume_info['path']):
+                        pdf_data = read_file(resume_info['path'], "rb")
+                        st.download_button(
+                            "Download Resume ⬇",
+                            data=pdf_data,
+                            file_name=resume_info['filename'],
+                            mime="application/pdf",
+                            key=f"resume_download_{idx}"
+                        )
+                    else:
+                        st.error("Resume file not available.")
                 if app['cover_letter']:
                     cover_letter_info = app['cover_letter']
-                    cv_data = read_file(cover_letter_info['path'], "rb")
-                    st.download_button(
-                        "Download Cover Letter ⬇",
-                        data=cv_data,
-                        file_name=cover_letter_info['filename'],
-                        mime="application/pdf",
-                        key=f"cover_letter_download_{idx}"
-                    )
+                    if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
+                        cv_data = read_file(cover_letter_info['path'], "rb")
+                        st.download_button(
+                            "Download Cover Letter ⬇",
+                            data=cv_data,
+                            file_name=cover_letter_info['filename'],
+                            mime="application/pdf",
+                            key=f"cover_letter_download_{idx}"
+                        )
+                    else:
+                        st.error("Cover letter file not available.")
     else:
         st.info("No applications tracked yet. Generate a resume or cover letter to start tracking.")
 
