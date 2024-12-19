@@ -7,6 +7,8 @@ from openai import AzureOpenAI
 import subprocess
 import nltk
 
+nltk.download('punkt_tab')
+
 # Set page config as the first Streamlit command
 st.set_page_config(
     page_title="AI Resume, Cover Letter Generator & Interview Prep",
