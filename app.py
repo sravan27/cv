@@ -57,7 +57,18 @@ def generate_filename(name, company, position, doc_type):
     return f"{safe_name}_{safe_company}_{safe_position}_{doc_type}_{timestamp}.json"
 
 def interview_system_prompt(user_data, job_details):
-    return f"You are a professional interviewer and career coach with deep knowledge of the company's needs and the candidate's background. Context: Job Description: {json.dumps(job_details, indent=2)} Candidate Resume Data: {json.dumps(user_data, indent=2)} Your Role: 1. Ask one challenging, context-specific interview question at a time. 2. After the candidate responds, provide constructive, personalized feedback focusing on areas to improve, and highlight strengths. 3. Coach the candidate by referencing both the job needs and their experience. 4. Then ask the next question, diving deeper each time. Be professional, encouraging, yet challenging."
+    return (
+        f"You are a professional interviewer and career coach with deep knowledge of the company's needs and the candidate's background.\n"
+        f"Context:\n"
+        f"Job Description:\n{json.dumps(job_details, indent=2)}\n"
+        f"Candidate Resume Data:\n{json.dumps(user_data, indent=2)}\n"
+        f"Your Role:\n"
+        f"1. Ask one challenging, context-specific interview question at a time.\n"
+        f"2. After the candidate responds, provide constructive, personalized feedback focusing on areas to improve, and highlight strengths.\n"
+        f"3. Coach the candidate by referencing both the job needs and their experience.\n"
+        f"4. Then ask the next question, going deeper each time.\n"
+        f"Be professional, encouraging, yet challenging."
+    )
 
 def generate_interview_turn(user_message, job_description, user_data, job_details):
     messages = [{"role": "system", "content": interview_system_prompt(user_data, job_details)}]
@@ -102,29 +113,49 @@ st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Choose the mode:", ["Resume & Cover Letter Generator", "Interview Preparation", "Upcoming Features"])
 
 if app_mode == "Resume & Cover Letter Generator":
-    st.header("Get a Job-Aligned, Personalized Resume (JSON-Based)")
-    st.write("We focus on ATS scores from JSON data.")
+    st.header("Get a Job-Aligned, Personalized Resume and ATS Scores")
+    st.write("Upload your current resume as a PDF. We'll analyze it and the job description to give you ATS scores.")
     job_description = st.text_area("Paste job description:", max_chars=5500, height=200, placeholder="Paste JD here...")
-    resume_file = st.file_uploader("Upload your current resume (JSON)", type=["json"])
-    generate_resume = st.button("Generate Optimized Resume Data (JSON)")
-    if generate_resume and job_description and resume_file:
+    resume_file = st.file_uploader("Upload your current resume (PDF)", type=["pdf"])
+    generate_resume_button = st.button("Generate Optimized Resume Data (JSON) and ATS Score Improvement")
+
+    if generate_resume_button and job_description and resume_file:
         api_key = st.secrets["OPENAI_API_KEY"]
         resume_llm = AutoApplyModel(api_key=api_key, provider="GPT", model="gpt-4o", downloads_dir="output")
-        user_data = json.load(resume_file)
-        st.session_state.user_data = user_data
+        os.makedirs("uploads", exist_ok=True)
+        resume_path = os.path.join("uploads", resume_file.name)
+        with open(resume_path, "wb") as f:
+            f.write(resume_file.getbuffer())
+
+        with st.spinner("Extracting user data from PDF resume..."):
+            user_data = resume_llm.user_data_extraction(resume_path, is_st=True)
+            st.session_state.user_data = user_data
+
+        shutil.rmtree("uploads")
+
+        if user_data is None:
+            st.error("Could not extract user data from the uploaded resume. Please try again with a valid PDF resume.")
+            st.stop()
+
         with st.spinner("Extracting job details..."):
             job_details, company, position = extract_job_details(job_description, resume_llm)
             st.session_state.job_details = job_details
+
         initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
-        with st.spinner("Generating optimized resume data..."):
+
+        with st.spinner("Generating optimized resume data (no PDF generation, just JSON) ..."):
             _, optimized_resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
+
         new_score = calculate_ats_score(json.dumps(optimized_resume_details), json.dumps(job_details))
+
         st.subheader("ATS Score Comparison")
         c1, c2 = st.columns(2)
         c1.metric("Original ATS Score", f"{initial_score}%")
         c2.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
+
         st.subheader("Optimized Resume Data (JSON)")
         st.json(optimized_resume_details)
+
         application_entry = {
             'company': company,
             'position': position,
@@ -134,7 +165,9 @@ if app_mode == "Resume & Cover Letter Generator":
             'status': "Resume Generated"
         }
         st.session_state.applications.append(application_entry)
-        st.success("Done! ATS Score Improved!")
+
+        st.success("ATS Score improved successfully!")
+
     if st.session_state.applications:
         st.subheader("Job Application Tracker")
         stages = ["Resume Generated", "Applied", "Interviewed", "Offer Received", "Hired", "Rejected"]
@@ -150,16 +183,18 @@ if app_mode == "Resume & Cover Letter Generator":
 
 elif app_mode == "Interview Preparation":
     st.header("AI Interview Preparation")
-    st.write("Uses job description and resume data for context.")
+    st.write("This uses the previously extracted resume data and job details.")
     if st.session_state.job_details and st.session_state.user_data:
-        st.write("Job details and resume data available.")
+        st.write("We have the job details and your resume data. Let's get started.")
     else:
-        st.warning("No job description and resume data found. Please return to Resume & Cover Letter Generator.")
+        st.warning("No job description and resume data found. Please go to Resume & Cover Letter Generator first.")
         st.stop()
+
     interview_type = st.selectbox("Select Interview Type", ["General", "HR Round", "Technical Round", "Behavioral Round"])
-    generate_interview = st.button("Generate Guided Interview Start")
+    generate_interview = st.button("Generate Initial Interview Questions")
+
     if generate_interview:
-        with st.spinner("Preparing interview questions..."):
+        with st.spinner("Generating initial interview questions..."):
             system_prompt = f"You are a helpful assistant generating {interview_type} interview questions."
             response = client.chat.completions.create(
                 model=AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -173,6 +208,7 @@ elif app_mode == "Interview Preparation":
             interview_questions = response.choices[0].message.content
             st.session_state.interview_questions = interview_questions
             st.text_area("Suggested Interview Questions:", value=interview_questions, height=200)
+
     st.markdown("---")
     st.subheader("Interactive Interview & Coaching Session")
     start_interview = st.button("Start Interview", disabled=st.session_state.interview_active or not (st.session_state.job_details and st.session_state.user_data))
@@ -181,8 +217,9 @@ elif app_mode == "Interview Preparation":
         st.session_state.interview_active = True
         initial_question = "Let's begin. Based on the job description and your experience, could you describe how your key accomplishments align with the role's requirements?"
         st.session_state.interview_history.append({"role": "assistant", "content": initial_question})
-        st.success("Interview started!")
+        st.success("Interview session started!")
         st.write(f"**Interviewer:** {initial_question}")
+
     if st.session_state.interview_active:
         user_answer = st.text_area("Your answer:", height=100, placeholder="Type your response here...")
         answer_submitted = st.button("Send Answer")
@@ -200,16 +237,16 @@ elif app_mode == "Upcoming Features":
     st.header("Upcoming Features & PDF Generation Explanation")
     st.write("Future enhancements:")
     st.markdown("""
-    - PDF Generation (requires environment with LaTeX packages)
+    - PDF Generation (currently omitted due to environment restrictions)
     - Multimodal Integration (images, audio)
     - Advanced Provider Management
     - Batch Applications
     """)
-    st.write("PDF generation is not shown due to environment restrictions. Once dependencies are available, we'll provide downloadable resumes.")
+    st.write("We currently do not generate PDF resumes due to environment constraints. Once dependencies are available, we'll enable polished PDF outputs.")
     st.subheader("Preview of Multimodal Integration")
     multimodal_file = st.file_uploader("Upload an asset:", type=["png", "jpg", "jpeg"])
     if multimodal_file:
-        st.warning("Not integrated yet.")
+        st.warning("Multimodal integration is under development. The uploaded file won't affect current ATS scoring or interview prep.")
 
 st.markdown("<hr style='border:1px solid #ddd' />", unsafe_allow_html=True)
 st.caption("Built on top of zlm by hireopt and team.")
