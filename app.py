@@ -184,18 +184,17 @@ if app_mode == "Resume & Cover Letter Generator":
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
+                # Call resume_builder
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
                 st.write("Resume builder returned:", resume_path)
 
-                # Ensure resume_path ends with .tex or .pdf
-                if not (resume_path.endswith(".tex") or resume_path.endswith(".pdf")):
-                    # Attempt fallback to known .tex file if it exists
-                    fallback_tex = os.path.join("output", "resume.tex")
-                    if os.path.exists(fallback_tex):
-                        resume_path = fallback_tex
-                    else:
-                        st.error("No valid .tex or .pdf file returned by resume_builder and no fallback found.")
-                        resume_path = None
+                # Force fallback to a known .tex file
+                fallback_tex = os.path.join("output", "resume.tex")
+                if os.path.exists(fallback_tex):
+                    resume_path = fallback_tex
+                else:
+                    st.error("No resume.tex found in output directory. Cannot generate PDF.")
+                    resume_path = None
 
                 if resume_path:
                     resume_path = ensure_pdf(resume_path)
@@ -219,23 +218,26 @@ if app_mode == "Resume & Cover Letter Generator":
                 cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
                 st.write("Cover letter builder returned:", cover_letter_path)
 
-                # Ensure cover_letter_path ends with .tex or .pdf
+                # Attempt fallback for cover letter as well, if needed
                 if cover_letter_path and not (cover_letter_path.endswith(".tex") or cover_letter_path.endswith(".pdf")):
-                    # Attempt fallback to a known file if needed
-                    fallback_tex_cl = os.path.join("output", "cover_letter.tex")
-                    if os.path.exists(fallback_tex_cl):
-                        cover_letter_path = fallback_tex_cl
+                    fallback_cl_tex = os.path.join("output", "cover_letter.tex")
+                    if os.path.exists(fallback_cl_tex):
+                        cover_letter_path = fallback_cl_tex
+                    else:
+                        st.error("No cover_letter.tex found in output directory. Cannot generate PDF.")
+                        cover_letter_path = None
 
-                cover_letter_path = ensure_pdf(cover_letter_path)
                 if cover_letter_path:
-                    st.session_state.generated_cover_letter = {
-                        'path': cover_letter_path,
-                        'filename': generate_filename(user_name, company, position, "Cover_Letter"),
-                        'details': cover_letter_details,
-                    }
-                    st.success("✅ Cover letter generated successfully!")
-                else:
-                    st.error("No cover letter PDF found after generation.")
+                    cover_letter_path = ensure_pdf(cover_letter_path)
+                    if cover_letter_path:
+                        st.session_state.generated_cover_letter = {
+                            'path': cover_letter_path,
+                            'filename': generate_filename(user_name, company, position, "Cover_Letter"),
+                            'details': cover_letter_details,
+                        }
+                        st.success("✅ Cover letter generated successfully!")
+                    else:
+                        st.error("No cover letter PDF found after generation.")
 
         application_entry = {
             'company': company,
