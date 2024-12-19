@@ -3,24 +3,22 @@ import json
 import shutil
 import streamlit as st
 from datetime import datetime
-from zlm import AutoApplyModel
-from zlm.utils.utils import display_pdf, read_file
-from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
-from openai import AzureOpenAI
+import subprocess
+
+# Comment out repeated downloads - do once and then comment out or add a check.
 import nltk
+# Download only if not already available - remove repeated calls
+# nltk.download('punkt_tab')
 
-nltk.download('punkt_tab')
+from openai import AzureOpenAI
 
-client = AzureOpenAI(
-    azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
-    api_version="2023-03-15-preview",
-    api_key=st.secrets["AZURE_OPENAI_API_KEY"]
-)
+# Print pdflatex version to confirm it's available
+st.write("pdflatex version check:")
+st.write(subprocess.getoutput("pdflatex --version"))
 
 # --- Utility Functions and Definitions ---
-
 def calculate_ats_score(text1, text2):
-    """Calculate ATS match score using multiple metrics."""
+    from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
     score = (
         jaccard_similarity(text1, text2) * 0.4
         + overlap_coefficient(text1, text2) * 0.3
@@ -29,7 +27,6 @@ def calculate_ats_score(text1, text2):
     return round(score * 100, 2)
 
 def extract_job_details(job_description, model):
-    """Extract company name and position from the job description."""
     job_details = model.job_details_extraction(
         job_site_content=job_description, is_st=True
     )[0]
@@ -38,11 +35,9 @@ def extract_job_details(job_description, model):
     return job_details, company, position
 
 def extract_user_name(user_data):
-    """Extract user's name from the resume data."""
     return user_data.get("name", "Candidate")
 
 def generate_filename(name, company, position, doc_type):
-    """Generate a meaningful filename with timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     safe_name = name.replace(" ", "_")
     safe_company = company.replace(" ", "_")
@@ -50,7 +45,6 @@ def generate_filename(name, company, position, doc_type):
     return f"{safe_name}_{safe_company}_{safe_position}_{doc_type}_{timestamp}.pdf"
 
 def remove_directory(path):
-    """Remove a directory if it exists."""
     if os.path.exists(path):
         shutil.rmtree(path)
 
@@ -70,7 +64,6 @@ if 'interview_questions' not in st.session_state:
 if 'job_description' not in st.session_state:
     st.session_state.job_description = ""
 
-# For the interview chatbot
 if 'interview_history' not in st.session_state:
     st.session_state.interview_history = []
 if 'interview_active' not in st.session_state:
@@ -78,19 +71,21 @@ if 'interview_active' not in st.session_state:
 if 'coaching_mode' not in st.session_state:
     st.session_state.coaching_mode = True
 
-# --- Set Streamlit Page Configuration ---
 st.set_page_config(
     page_title="AI Resume, Cover Letter Generator & Interview Prep",
     page_icon="📑",
     layout="wide",
 )
 
-# --- Azure OpenAI Configuration ---
+client = AzureOpenAI(
+    azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
+    api_version="2023-03-15-preview",
+    api_key=st.secrets["AZURE_OPENAI_API_KEY"]
+)
+
 AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
 
-# --- Interview Chatbot Functions ---
 def interview_system_prompt():
-    """System prompt for the interview mode that includes coaching."""
     return """You are a helpful interviewer and career coach. 
 You know the job description and the company's needs. 
 You will:
@@ -101,13 +96,9 @@ Keep the conversation professional, helpful, and structured.
 """
 
 def generate_interview_turn(user_message, job_description):
-    """Generate the next turn in the interview using the conversation history and job description."""
     messages = [{"role": "system", "content": interview_system_prompt()}]
-
-    # Add job description context as a system role message
     if job_description:
         messages.append({"role": "system", "content": f"Job Description:\n{job_description}"})
-
     messages.extend(st.session_state.interview_history)
     messages.append({"role": "user", "content": user_message})
 
@@ -120,8 +111,6 @@ def generate_interview_turn(user_message, job_description):
 
     return response.choices[0].message.content.strip()
 
-# --- Main Application ---
-
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox(
     "Choose the app mode",
@@ -129,25 +118,26 @@ app_mode = st.sidebar.selectbox(
 )
 
 if app_mode == "Resume & Cover Letter Generator":
+    # Import here to avoid concurrency issues at startup
+    from zlm import AutoApplyModel
+    from zlm.utils.utils import display_pdf, read_file
+
     remove_directory("output")
 
     st.header("AI Resume & Cover Letter Generator", divider="rainbow")
 
-    # Job Description Input
     job_description = st.text_area(
         "Paste job description:",
         max_chars=5500,
         height=300,
         placeholder="Paste the job description here...",
     )
-    st.session_state.job_description = job_description  # Store in session state
+    st.session_state.job_description = job_description
 
-    # File Upload
     resume_file = st.file_uploader(
         "Upload your current resume (PDF/JSON)", type=["pdf", "json"]
     )
 
-    # Generate Buttons
     col1, col2 = st.columns(2)
     with col1:
         generate_resume = st.button(
@@ -166,7 +156,6 @@ if app_mode == "Resume & Cover Letter Generator":
         shutil.copy("templates/resume.cls", download_path)
         shutil.copy("templates/resume.tex.jinja", download_path)
 
-        # Securely access your OpenAI API key
         api_key = st.secrets["OPENAI_API_KEY"]
 
         resume_llm = AutoApplyModel(
@@ -176,7 +165,6 @@ if app_mode == "Resume & Cover Letter Generator":
             downloads_dir=download_path,
         )
 
-        # Process uploaded resume file
         os.makedirs("uploads", exist_ok=True)
         resume_file_path = os.path.abspath(
             os.path.join("uploads", resume_file.name)
@@ -185,23 +173,19 @@ if app_mode == "Resume & Cover Letter Generator":
             f.write(resume_file.getbuffer())
 
         with st.spinner("Analyzing your resume and job description..."):
-            # Extract user data from resume
             user_data = resume_llm.user_data_extraction(
                 resume_file_path, is_st=True
             )
             user_name = extract_user_name(user_data)
 
-            # Extract job details
             job_details, company, position = extract_job_details(
                 job_description, resume_llm
             )
 
-            # Calculate initial ATS score
             initial_score = calculate_ats_score(
                 json.dumps(user_data), json.dumps(job_details)
             )
 
-        # Track whether new documents were generated
         new_resume_generated = False
         new_cover_letter_generated = False
 
@@ -210,25 +194,19 @@ if app_mode == "Resume & Cover Letter Generator":
                 resume_path, resume_details = resume_llm.resume_builder(
                     job_details, user_data, is_st=True
                 )
-
-                # Check if PDF generated
+                st.write("Resume generated at:", resume_path)
                 if not os.path.exists(resume_path):
-                    st.error("Resume PDF not generated. Check template placement and logs.")
+                    st.error("Resume PDF not generated.")
                 else:
-                    # Calculate new ATS score
                     new_score = calculate_ats_score(
                         json.dumps(resume_details), json.dumps(job_details)
                     )
-
-                    # Store the generated resume in session state
                     st.session_state.generated_resume = {
                         'path': resume_path,
                         'filename': generate_filename(
                             user_name, company, position, "Resume"
                         ),
                     }
-
-                    # Display ATS scores
                     c1, c2 = st.columns(2)
                     with c1:
                         st.metric("Original ATS Score", f"{initial_score}%")
@@ -247,10 +225,9 @@ if app_mode == "Resume & Cover Letter Generator":
                 cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(
                     job_details, user_data, is_st=True
                 )
-
-                # Check if PDF generated
+                st.write("Cover letter generated at:", cover_letter_path)
                 if not os.path.exists(cover_letter_path):
-                    st.error("Cover letter PDF not generated. Check template placement and logs.")
+                    st.error("Cover letter PDF not generated.")
                 else:
                     st.session_state.generated_cover_letter = {
                         'path': cover_letter_path,
@@ -259,26 +236,22 @@ if app_mode == "Resume & Cover Letter Generator":
                         ),
                         'details': cover_letter_details,
                     }
-
                     st.success("✅ Cover letter generated successfully!")
                     new_cover_letter_generated = True
 
-        # Add application to tracker with a default status
         application_entry = {
             'company': company,
             'position': position,
             'date': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'resume': st.session_state.generated_resume,
             'cover_letter': st.session_state.generated_cover_letter,
-            'status': "Resume & Cover Letter Generated"  # default status
+            'status': "Resume & Cover Letter Generated"
         }
         st.session_state.applications.append(application_entry)
 
-        # Clean up uploaded files
         remove_directory("uploads")
         st.balloons()
 
-    # Display Generated Documents if Available
     if st.session_state.generated_resume or st.session_state.generated_cover_letter:
         st.subheader("Your Generated Documents")
 
@@ -286,6 +259,7 @@ if app_mode == "Resume & Cover Letter Generator":
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
             if resume_info['path'] and os.path.exists(resume_info['path']):
+                from zlm.utils.utils import read_file, display_pdf
                 pdf_data = read_file(resume_info['path'], "rb")
                 st.download_button(
                     "Download Resume ⬇",
@@ -301,6 +275,7 @@ if app_mode == "Resume & Cover Letter Generator":
             cover_letter_info = st.session_state.generated_cover_letter
             st.write(f"**Cover Letter:** {cover_letter_info['filename']}")
             if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
+                from zlm.utils.utils import read_file
                 cv_data = read_file(cover_letter_info['path'], "rb")
                 st.download_button(
                     "Download Cover Letter ⬇",
@@ -312,14 +287,11 @@ if app_mode == "Resume & Cover Letter Generator":
             else:
                 st.error("Cover letter file not found. Please try again.")
 
-    # Display Job Application Tracker
     if st.session_state.applications:
         st.subheader("Job Application Tracker")
-        # Predefined stages of application
         stages = ["Resume & Cover Letter Generated", "Applied", "Interviewed", "Offer Received", "Hired", "Rejected"]
         for idx, app in enumerate(st.session_state.applications):
             with st.expander(f"Application {idx + 1}: {app['position']} at {app['company']} ({app['date']})"):
-                # Status selector with unique key
                 app['status'] = st.selectbox(
                     "Application Status:", 
                     stages, 
@@ -327,7 +299,6 @@ if app_mode == "Resume & Cover Letter Generator":
                     key=f"app_status_{idx}"
                 )
 
-                # Download resume from tracker
                 if app['resume'] and app['resume']['path'] and os.path.exists(app['resume']['path']):
                     resume_info = app['resume']
                     pdf_data = read_file(resume_info['path'], "rb")
@@ -341,7 +312,6 @@ if app_mode == "Resume & Cover Letter Generator":
                 else:
                     st.info("Resume file not available.")
 
-                # Download cover letter from tracker
                 if app['cover_letter'] and app['cover_letter']['path'] and os.path.exists(app['cover_letter']['path']):
                     cover_letter_info = app['cover_letter']
                     cv_data = read_file(cover_letter_info['path'], "rb")
@@ -359,10 +329,11 @@ if app_mode == "Resume & Cover Letter Generator":
         st.info("No applications tracked yet. Generate a resume or cover letter to start tracking.")
 
 elif app_mode == "Interview Preparation":
-    # --- Interview Preparation Code ---
+    # Import only when needed
+    from zlm.utils.utils import read_file, display_pdf
+
     st.header("AI Interview Preparation", divider="rainbow")
 
-    # Use the same job description from the resume and cover letter generator
     job_description = st.session_state.get('job_description', '')
     if not job_description:
         job_description = st.text_area(
@@ -373,13 +344,11 @@ elif app_mode == "Interview Preparation":
         )
         st.session_state.job_description = job_description
 
-    # Select Interview Type
     interview_type = st.selectbox(
         "Select Interview Type",
         ["General", "HR Round", "Technical Round", "Behavioral Round"]
     )
 
-    # Generate Interview Questions Button
     generate_interview = st.button("Generate Interview Questions", type="primary")
 
     if generate_interview and job_description:
@@ -416,7 +385,6 @@ elif app_mode == "Interview Preparation":
         if st.session_state.interview_questions:
             st.text_area("Interview Questions:", value=st.session_state.interview_questions, height=300)
 
-    # --- Interactive Interview Chatbot ---
     st.markdown("---")
     st.subheader("Interactive Interview & Coaching Session")
 
@@ -455,7 +423,6 @@ elif app_mode == "Interview Preparation":
 else:
     st.error("Invalid App Mode Selected.")
 
-# --- Exception Handling ---
 try:
     pass
 except Exception as e:
