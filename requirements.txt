@@ -3,4 +3,8 @@ openai
 zlm
 nltk
 tectonic
-
+streamlit
+openai
+nltk
+tectonic
+git+https://github.com/sravan27/job-llm.git@main
