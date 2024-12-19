@@ -186,26 +186,46 @@ if app_mode == "Resume & Cover Letter Generator":
             with st.spinner("Generating optimized resume..."):
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
                 st.write("Resume builder returned:", resume_path)
-                resume_path = ensure_pdf(resume_path)
+
+                # Ensure resume_path ends with .tex or .pdf
+                if not (resume_path.endswith(".tex") or resume_path.endswith(".pdf")):
+                    # Attempt fallback to known .tex file if it exists
+                    fallback_tex = os.path.join("output", "resume.tex")
+                    if os.path.exists(fallback_tex):
+                        resume_path = fallback_tex
+                    else:
+                        st.error("No valid .tex or .pdf file returned by resume_builder and no fallback found.")
+                        resume_path = None
+
                 if resume_path:
-                    new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
-                    st.session_state.generated_resume = {
-                        'path': resume_path,
-                        'filename': generate_filename(user_name, company, position, "Resume"),
-                    }
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.metric("Original ATS Score", f"{initial_score}%")
-                    with c2:
-                        st.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
-                    st.success("✅ Resume generated successfully!")
-                else:
-                    st.error("No resume PDF found after generation.")
+                    resume_path = ensure_pdf(resume_path)
+                    if resume_path:
+                        new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
+                        st.session_state.generated_resume = {
+                            'path': resume_path,
+                            'filename': generate_filename(user_name, company, position, "Resume"),
+                        }
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.metric("Original ATS Score", f"{initial_score}%")
+                        with c2:
+                            st.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
+                        st.success("✅ Resume generated successfully!")
+                    else:
+                        st.error("No resume PDF found after generation.")
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
                 cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
                 st.write("Cover letter builder returned:", cover_letter_path)
+
+                # Ensure cover_letter_path ends with .tex or .pdf
+                if cover_letter_path and not (cover_letter_path.endswith(".tex") or cover_letter_path.endswith(".pdf")):
+                    # Attempt fallback to a known file if needed
+                    fallback_tex_cl = os.path.join("output", "cover_letter.tex")
+                    if os.path.exists(fallback_tex_cl):
+                        cover_letter_path = fallback_tex_cl
+
                 cover_letter_path = ensure_pdf(cover_letter_path)
                 if cover_letter_path:
                     st.session_state.generated_cover_letter = {
