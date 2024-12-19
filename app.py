@@ -1,24 +1,31 @@
 import os
 import json
 import shutil
+import subprocess
 import streamlit as st
 from datetime import datetime
 from openai import AzureOpenAI
-import subprocess
-import nltk
 
-# Set page config as first Streamlit command
+# NLTK imports and downloads (do this before Streamlit UI calls)
+import nltk
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
+nltk.download('punkt_tab', quiet=True)
+
+# Set page config as the first Streamlit command
 st.set_page_config(
     page_title="AI Resume, Cover Letter Generator & Interview Prep",
     page_icon="📑",
     layout="wide",
 )
 
-# Print pdflatex version for debugging
+# Check pdflatex availability
 st.write("Checking pdflatex availability:")
 pdflatex_version = subprocess.getoutput("pdflatex --version")
 st.write(pdflatex_version)
 
+# Set up Azure OpenAI client
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
     api_version="2023-03-15-preview",
@@ -36,9 +43,7 @@ def calculate_ats_score(text1, text2):
     return round(score * 100, 2)
 
 def extract_job_details(job_description, model):
-    job_details = model.job_details_extraction(
-        job_site_content=job_description, is_st=True
-    )[0]
+    job_details = model.job_details_extraction(job_site_content=job_description, is_st=True)[0]
     company = job_details.get("company_name", "Company")
     position = job_details.get("job_title", "Position")
     return job_details, company, position
@@ -100,20 +105,14 @@ if 'coaching_mode' not in st.session_state:
     st.session_state.coaching_mode = True
 
 st.sidebar.title("Navigation")
-app_mode = st.sidebar.selectbox(
-    "Choose the app mode",
-    ["Resume & Cover Letter Generator", "Interview Preparation"]
-)
+app_mode = st.sidebar.selectbox("Choose the app mode", ["Resume & Cover Letter Generator", "Interview Preparation"])
 
 if app_mode == "Resume & Cover Letter Generator":
     from zlm import AutoApplyModel
     from zlm.utils.utils import display_pdf, read_file
     from zlm.utils.latex_ops import latex_to_pdf
 
-    # Ensure output directory exists
-    os.makedirs("output", exist_ok=True)
-
-    # Clear output directory if needed
+    # Ensure output directory exists and is empty
     remove_directory("output")
     os.makedirs("output", exist_ok=True)
 
@@ -123,23 +122,17 @@ if app_mode == "Resume & Cover Letter Generator":
         "Paste job description:",
         max_chars=5500,
         height=300,
-        placeholder="Paste the job description here...",
+        placeholder="Paste the job description here..."
     )
     st.session_state.job_description = job_description
 
-    resume_file = st.file_uploader(
-        "Upload your current resume (PDF/JSON)", type=["pdf", "json"]
-    )
+    resume_file = st.file_uploader("Upload your current resume (PDF/JSON)", type=["pdf", "json"])
 
     col1, col2 = st.columns(2)
     with col1:
-        generate_resume = st.button(
-            "Generate Optimized Resume", type="primary", use_container_width=True
-        )
+        generate_resume = st.button("Generate Optimized Resume", type="primary", use_container_width=True)
     with col2:
-        generate_cover_letter = st.button(
-            "Generate Cover Letter", type="primary", use_container_width=True
-        )
+        generate_cover_letter = st.button("Generate Cover Letter", type="primary", use_container_width=True)
 
     if (generate_resume or generate_cover_letter) and job_description and resume_file:
         api_key = st.secrets["OPENAI_API_KEY"]
@@ -147,13 +140,12 @@ if app_mode == "Resume & Cover Letter Generator":
             api_key=api_key,
             provider="GPT",
             model="gpt-4o",
-            downloads_dir="output",  # point to the known output folder
+            downloads_dir="output"
         )
 
+        # Save uploaded resume file
         os.makedirs("uploads", exist_ok=True)
-        resume_file_path = os.path.abspath(
-            os.path.join("uploads", resume_file.name)
-        )
+        resume_file_path = os.path.abspath(os.path.join("uploads", resume_file.name))
         with open(resume_file_path, "wb") as f:
             f.write(resume_file.getbuffer())
 
@@ -167,21 +159,30 @@ if app_mode == "Resume & Cover Letter Generator":
             job_details, company, position = extract_job_details(job_description, resume_llm)
             initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
+        def ensure_pdf(filepath):
+            # If a .tex file is returned, we compile it to PDF
+            if filepath and filepath.endswith(".tex"):
+                st.write("LaTeX file detected, attempting to compile to PDF...")
+                pdf_path = latex_to_pdf(filepath)
+                st.write("Directory listing after compilation attempt:", os.listdir("output"))
+                if pdf_path and os.path.exists(pdf_path):
+                    st.write("PDF successfully generated at:", pdf_path)
+                    return pdf_path
+                else:
+                    st.error("Failed to generate PDF from LaTeX. Check LaTeX logs or template compatibility.")
+                    return None
+            elif filepath and filepath.endswith(".pdf") and os.path.exists(filepath):
+                return filepath
+            else:
+                st.error("No valid .pdf or .tex file returned from resume/cover letter builder.")
+                return None
+
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
                 resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
-                st.write("Resume generated at:", resume_path)
-
-                # If resume_path is .tex, compile it to PDF
-                if resume_path.endswith(".tex"):
-                    pdf_path = latex_to_pdf(resume_path)
-                    if pdf_path and os.path.exists(pdf_path):
-                        resume_path = pdf_path
-                    else:
-                        st.error("Failed to generate PDF from LaTeX.")
-                        resume_path = None
-
-                if resume_path and resume_path.endswith(".pdf") and os.path.exists(resume_path):
+                st.write("Resume builder returned:", resume_path)
+                resume_path = ensure_pdf(resume_path)
+                if resume_path:
                     new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
                     st.session_state.generated_resume = {
                         'path': resume_path,
@@ -199,18 +200,9 @@ if app_mode == "Resume & Cover Letter Generator":
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
                 cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
-                st.write("Cover letter generated at:", cover_letter_path)
-
-                # If cover_letter_path is .tex, compile it to PDF
-                if cover_letter_path.endswith(".tex"):
-                    pdf_path = latex_to_pdf(cover_letter_path)
-                    if pdf_path and os.path.exists(pdf_path):
-                        cover_letter_path = pdf_path
-                    else:
-                        st.error("Failed to generate PDF from LaTeX (cover letter).")
-                        cover_letter_path = None
-
-                if cover_letter_path and cover_letter_path.endswith(".pdf") and os.path.exists(cover_letter_path):
+                st.write("Cover letter builder returned:", cover_letter_path)
+                cover_letter_path = ensure_pdf(cover_letter_path)
+                if cover_letter_path:
                     st.session_state.generated_cover_letter = {
                         'path': cover_letter_path,
                         'filename': generate_filename(user_name, company, position, "Cover_Letter"),
@@ -235,6 +227,8 @@ if app_mode == "Resume & Cover Letter Generator":
 
     if st.session_state.generated_resume or st.session_state.generated_cover_letter:
         st.subheader("Your Generated Documents")
+        from zlm.utils.utils import read_file  # Redundant but ensures scope
+
         if st.session_state.generated_resume:
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
@@ -286,19 +280,10 @@ elif app_mode == "Interview Preparation":
 
     job_description = st.session_state.get('job_description', '')
     if not job_description:
-        job_description = st.text_area(
-            "Paste job description:",
-            max_chars=5500,
-            height=300,
-            placeholder="Paste the job description here...",
-        )
+        job_description = st.text_area("Paste job description:", max_chars=5500, height=300, placeholder="Paste the job description here...")
         st.session_state.job_description = job_description
 
-    interview_type = st.selectbox(
-        "Select Interview Type",
-        ["General", "HR Round", "Technical Round", "Behavioral Round"]
-    )
-
+    interview_type = st.selectbox("Select Interview Type", ["General", "HR Round", "Technical Round", "Behavioral Round"])
     generate_interview = st.button("Generate Interview Questions", type="primary")
 
     if generate_interview and job_description:
@@ -340,7 +325,7 @@ elif app_mode == "Interview Preparation":
     **Instructions:**
     - Ensure a job description is provided.
     - Click 'Start Interview' to begin an interactive Q&A session.
-    - The system will ask you a question, you respond, and it will give feedback and ask the next question.
+    - The system will ask you a question, you respond, and it will provide feedback and ask the next question.
     - You can stop at any time.
     """)
 
