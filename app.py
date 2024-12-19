@@ -1,5 +1,3 @@
-# web_app.py
-
 import os
 import json
 import shutil
@@ -9,9 +7,9 @@ from zlm import AutoApplyModel
 from zlm.utils.utils import display_pdf, read_file
 from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
 from openai import AzureOpenAI
+
 import nltk
 nltk.download('punkt_tab')
-
 
 client = AzureOpenAI(
     azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
@@ -72,12 +70,11 @@ if 'interview_questions' not in st.session_state:
 if 'job_description' not in st.session_state:
     st.session_state.job_description = ""
 
+# For the interview chatbot
 if 'interview_history' not in st.session_state:
     st.session_state.interview_history = []
-
 if 'interview_active' not in st.session_state:
     st.session_state.interview_active = False
-
 if 'coaching_mode' not in st.session_state:
     st.session_state.coaching_mode = True
 
@@ -98,7 +95,7 @@ def interview_system_prompt():
 You know the job description and the company's needs. 
 You will:
 1. Ask the candidate one interview question at a time.
-2. After the candidate responds, provide constructive feedback and coaching tips.
+2. After the candidate responds, provide constructive feedback and coaching tips on their answer.
 3. Then ask the next question.
 Keep the conversation professional, helpful, and structured.
 """
@@ -107,6 +104,7 @@ def generate_interview_turn(user_message, job_description):
     """Generate the next turn in the interview using the conversation history and job description."""
     messages = [{"role": "system", "content": interview_system_prompt()}]
 
+    # Add job description context as a system role message
     if job_description:
         messages.append({"role": "system", "content": f"Job Description:\n{job_description}"})
 
@@ -123,6 +121,7 @@ def generate_interview_turn(user_message, job_description):
     return response.choices[0].message.content.strip()
 
 # --- Main Application ---
+
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox(
     "Choose the app mode",
@@ -134,102 +133,141 @@ if app_mode == "Resume & Cover Letter Generator":
 
     st.header("AI Resume & Cover Letter Generator", divider="rainbow")
 
+    # Job Description Input
     job_description = st.text_area(
         "Paste job description:",
         max_chars=5500,
         height=300,
         placeholder="Paste the job description here...",
     )
-    st.session_state.job_description = job_description
+    st.session_state.job_description = job_description  # Store in session state
 
+    # File Upload
     resume_file = st.file_uploader(
         "Upload your current resume (PDF/JSON)", type=["pdf", "json"]
     )
 
+    # Generate Buttons
     col1, col2 = st.columns(2)
     with col1:
-        generate_resume = st.button("Generate Optimized Resume", type="primary", use_container_width=True)
+        generate_resume = st.button(
+            "Generate Optimized Resume", type="primary", use_container_width=True
+        )
     with col2:
-        generate_cover_letter = st.button("Generate Cover Letter", type="primary", use_container_width=True)
+        generate_cover_letter = st.button(
+            "Generate Cover Letter", type="primary", use_container_width=True
+        )
 
     if (generate_resume or generate_cover_letter) and job_description and resume_file:
-        # Ensure we have a writable output directory
         download_path = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(download_path, exist_ok=True)
 
-        # Copy resume.cls to the output directory to ensure it's writable and accessible
-        templates_dir = os.path.join(os.path.dirname(__file__), "templates")
-        shutil.copy(os.path.join(templates_dir, "resume.cls"), download_path)
-
+        # Securely access your OpenAI API key
         api_key = st.secrets["OPENAI_API_KEY"]
+
         resume_llm = AutoApplyModel(
             api_key=api_key,
             provider="GPT",
             model="gpt-4o",
-            downloads_dir=download_path
+            downloads_dir=download_path,
         )
 
-        # Process the uploaded resume file
+        # Process uploaded resume file
         os.makedirs("uploads", exist_ok=True)
-        resume_file_path = os.path.abspath(os.path.join("uploads", resume_file.name))
+        resume_file_path = os.path.abspath(
+            os.path.join("uploads", resume_file.name)
+        )
         with open(resume_file_path, "wb") as f:
             f.write(resume_file.getbuffer())
 
         with st.spinner("Analyzing your resume and job description..."):
-            user_data = resume_llm.user_data_extraction(resume_file_path, is_st=True)
+            # Extract user data from resume
+            user_data = resume_llm.user_data_extraction(
+                resume_file_path, is_st=True
+            )
             user_name = extract_user_name(user_data)
-            job_details, company, position = extract_job_details(job_description, resume_llm)
-            initial_score = calculate_ats_score(json.dumps(user_data), json.dumps(job_details))
 
+            # Extract job details
+            job_details, company, position = extract_job_details(
+                job_description, resume_llm
+            )
+
+            # Calculate initial ATS score
+            initial_score = calculate_ats_score(
+                json.dumps(user_data), json.dumps(job_details)
+            )
+
+        # Track whether new documents were generated
         new_resume_generated = False
         new_cover_letter_generated = False
 
         if generate_resume:
             with st.spinner("Generating optimized resume..."):
-                # This should now generate files in the download_path directory
-                resume_path, resume_details = resume_llm.resume_builder(job_details, user_data, is_st=True)
+                resume_path, resume_details = resume_llm.resume_builder(
+                    job_details, user_data, is_st=True
+                )
 
-                new_score = calculate_ats_score(json.dumps(resume_details), json.dumps(job_details))
+                # Calculate new ATS score
+                new_score = calculate_ats_score(
+                    json.dumps(resume_details), json.dumps(job_details)
+                )
 
+                # Store the generated resume in session state
                 st.session_state.generated_resume = {
                     'path': resume_path,
-                    'filename': generate_filename(user_name, company, position, "Resume"),
+                    'filename': generate_filename(
+                        user_name, company, position, "Resume"
+                    ),
                 }
 
-                c1, c2 = st.columns(2)
-                with c1:
+                # Display ATS scores
+                col1, col2 = st.columns(2)
+                with col1:
                     st.metric("Original ATS Score", f"{initial_score}%")
-                with c2:
-                    st.metric("Optimized ATS Score", f"{new_score}%", delta=f"{new_score - initial_score}%")
+                with col2:
+                    st.metric(
+                        "Optimized ATS Score",
+                        f"{new_score}%",
+                        delta=f"{new_score - initial_score}%",
+                    )
 
                 st.success("✅ Resume generated successfully!")
                 new_resume_generated = True
 
         if generate_cover_letter:
             with st.spinner("Generating cover letter..."):
-                cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(job_details, user_data, is_st=True)
+                cover_letter_details, cover_letter_path = resume_llm.cover_letter_generator(
+                    job_details, user_data, is_st=True
+                )
+
+                # Store the generated cover letter in session state
                 st.session_state.generated_cover_letter = {
                     'path': cover_letter_path,
-                    'filename': generate_filename(user_name, company, position, "Cover_Letter"),
+                    'filename': generate_filename(
+                        user_name, company, position, "Cover_Letter"
+                    ),
                     'details': cover_letter_details,
                 }
 
                 st.success("✅ Cover letter generated successfully!")
                 new_cover_letter_generated = True
 
+        # Add application to tracker with a default status
         application_entry = {
             'company': company,
             'position': position,
             'date': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'resume': st.session_state.generated_resume,
             'cover_letter': st.session_state.generated_cover_letter,
+            'status': "Resume & Cover Letter Generated"  # default status
         }
         st.session_state.applications.append(application_entry)
 
+        # Clean up uploaded files
         remove_directory("uploads")
         st.balloons()
 
-    # Display Documents
+    # Display Generated Documents if Available
     if st.session_state.generated_resume or st.session_state.generated_cover_letter:
         st.subheader("Your Generated Documents")
 
@@ -238,7 +276,12 @@ if app_mode == "Resume & Cover Letter Generator":
             st.write(f"**Resume:** {resume_info['filename']}")
             if resume_info['path'] and os.path.exists(resume_info['path']):
                 pdf_data = read_file(resume_info['path'], "rb")
-                st.download_button("Download Resume ⬇", data=pdf_data, file_name=resume_info['filename'], mime="application/pdf")
+                st.download_button(
+                    "Download Resume ⬇",
+                    data=pdf_data,
+                    file_name=resume_info['filename'],
+                    mime="application/pdf",
+                )
                 display_pdf(resume_info['path'], type="image")
             else:
                 st.error("Resume file not found. Please try again.")
@@ -248,62 +291,84 @@ if app_mode == "Resume & Cover Letter Generator":
             st.write(f"**Cover Letter:** {cover_letter_info['filename']}")
             if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
                 cv_data = read_file(cover_letter_info['path'], "rb")
-                st.download_button("Download Cover Letter ⬇", data=cv_data, file_name=cover_letter_info['filename'], mime="application/pdf")
+                st.download_button(
+                    "Download Cover Letter ⬇",
+                    data=cv_data,
+                    file_name=cover_letter_info['filename'],
+                    mime="application/pdf",
+                )
                 st.markdown(cover_letter_info['details'], unsafe_allow_html=True)
             else:
-                st.error("Cover Letter file not found. Please try again.")
+                st.error("Cover letter file not found. Please try again.")
 
     # Display Job Application Tracker
     if st.session_state.applications:
         st.subheader("Job Application Tracker")
+        # Predefined stages of application
+        stages = ["Resume & Cover Letter Generated", "Applied", "Interviewed", "Offer Received", "Hired", "Rejected"]
         for idx, app in enumerate(st.session_state.applications):
             with st.expander(f"Application {idx + 1}: {app['position']} at {app['company']} ({app['date']})"):
-                if app['resume']:
+                # Status selector
+                app['status'] = st.selectbox("Application Status:", stages, index=stages.index(app['status']))
+
+                # Download resume from tracker
+                if app['resume'] and app['resume']['path'] and os.path.exists(app['resume']['path']):
                     resume_info = app['resume']
-                    if resume_info['path'] and os.path.exists(resume_info['path']):
-                        pdf_data = read_file(resume_info['path'], "rb")
-                        st.download_button(
-                            "Download Resume ⬇",
-                            data=pdf_data,
-                            file_name=resume_info['filename'],
-                            mime="application/pdf",
-                            key=f"resume_download_{idx}"
-                        )
-                    else:
-                        st.error("Resume file not available.")
-                if app['cover_letter']:
+                    pdf_data = read_file(resume_info['path'], "rb")
+                    st.download_button(
+                        "Download Resume ⬇",
+                        data=pdf_data,
+                        file_name=resume_info['filename'],
+                        mime="application/pdf",
+                        key=f"resume_download_{idx}"
+                    )
+                else:
+                    st.info("Resume file not available.")
+
+                # Download cover letter from tracker
+                if app['cover_letter'] and app['cover_letter']['path'] and os.path.exists(app['cover_letter']['path']):
                     cover_letter_info = app['cover_letter']
-                    if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
-                        cv_data = read_file(cover_letter_info['path'], "rb")
-                        st.download_button(
-                            "Download Cover Letter ⬇",
-                            data=cv_data,
-                            file_name=cover_letter_info['filename'],
-                            mime="application/pdf",
-                            key=f"cover_letter_download_{idx}"
-                        )
-                    else:
-                        st.error("Cover letter file not available.")
+                    cv_data = read_file(cover_letter_info['path'], "rb")
+                    st.download_button(
+                        "Download Cover Letter ⬇",
+                        data=cv_data,
+                        file_name=cover_letter_info['filename'],
+                        mime="application/pdf",
+                        key=f"cover_letter_download_{idx}"
+                    )
+                else:
+                    st.info("Cover letter file not available.")
+
     else:
         st.info("No applications tracked yet. Generate a resume or cover letter to start tracking.")
 
 elif app_mode == "Interview Preparation":
+    # --- Interview Preparation Code ---
     st.header("AI Interview Preparation", divider="rainbow")
 
+    # Use the same job description from the resume and cover letter generator
     job_description = st.session_state.get('job_description', '')
     if not job_description:
-        job_description = st.text_area("Paste job description:", max_chars=5500, height=300, placeholder="Paste the job description here...")
+        job_description = st.text_area(
+            "Paste job description:",
+            max_chars=5500,
+            height=300,
+            placeholder="Paste the job description here...",
+        )
         st.session_state.job_description = job_description
 
+    # Select Interview Type
     interview_type = st.selectbox(
         "Select Interview Type",
         ["General", "HR Round", "Technical Round", "Behavioral Round"]
     )
 
+    # Generate Interview Questions Button
     generate_interview = st.button("Generate Interview Questions", type="primary")
 
     if generate_interview and job_description:
         with st.spinner("Generating interview questions..."):
+            # Prepare the prompt based on the interview type
             if interview_type == "General":
                 system_prompt = "You are a helpful assistant generating general interview questions."
             elif interview_type == "HR Round":
@@ -336,7 +401,7 @@ elif app_mode == "Interview Preparation":
         if st.session_state.interview_questions:
             st.text_area("Interview Questions:", value=st.session_state.interview_questions, height=300)
 
-    # Interactive Interview & Coaching
+    # --- Interactive Interview Chatbot ---
     st.markdown("---")
     st.subheader("Interactive Interview & Coaching Session")
 
@@ -344,11 +409,13 @@ elif app_mode == "Interview Preparation":
     **Instructions:**
     - Ensure a job description is provided.
     - Click 'Start Interview' to begin an interactive Q&A session.
-    - After you respond, the system will provide feedback and continue.
+    - The system will ask you a question, you respond, and it will give feedback and ask the next question.
+    - You can stop at any time.
     """)
 
     start_interview = st.button("Start Interview", disabled=st.session_state.interview_active or not job_description)
     if start_interview:
+        # Reset interview history and start fresh
         st.session_state.interview_history = []
         st.session_state.interview_active = True
         initial_question = "Let's begin. Could you tell me how your experience aligns with this role?"
@@ -361,9 +428,14 @@ elif app_mode == "Interview Preparation":
         answer_submitted = st.button("Send Answer")
 
         if answer_submitted and user_answer.strip():
+            # Add user's answer
             st.session_state.interview_history.append({"role": "user", "content": user_answer})
+
+            # Generate response with coaching and next question
             response = generate_interview_turn(user_answer, st.session_state.job_description)
             st.session_state.interview_history.append({"role": "assistant", "content": response})
+
+            # Display the assistant's response
             st.write(f"**Interviewer/Coach:** {response}")
 
         stop_interview = st.button("Stop Interview")
@@ -374,6 +446,7 @@ elif app_mode == "Interview Preparation":
 else:
     st.error("Invalid App Mode Selected.")
 
+# --- Exception Handling ---
 try:
     pass
 except Exception as e:
