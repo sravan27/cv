@@ -3,21 +3,33 @@ import json
 import shutil
 import streamlit as st
 from datetime import datetime
+from openai import AzureOpenAI
 import subprocess
-
-# Comment out repeated downloads - do once and then comment out or add a check.
 import nltk
-# Download only if not already available - remove repeated calls
+
+# Download NLTK data if needed. Run once and then comment out.
+# nltk.download('punkt')
+# nltk.download('stopwords')
+# nltk.download('averaged_perceptron_tagger')
 # nltk.download('punkt_tab')
 
-from openai import AzureOpenAI
+# Print pdflatex version for debugging
+st.write("Checking pdflatex availability:")
+pdflatex_version = subprocess.getoutput("pdflatex --version")
+st.write(pdflatex_version)
 
-# Print pdflatex version to confirm it's available
-st.write("pdflatex version check:")
-st.write(subprocess.getoutput("pdflatex --version"))
+# Azure OpenAI client
+client = AzureOpenAI(
+    azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
+    api_version="2023-03-15-preview",
+    api_key=st.secrets["AZURE_OPENAI_API_KEY"]
+)
+
+AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
 
 # --- Utility Functions and Definitions ---
 def calculate_ats_score(text1, text2):
+    # Import metrics here to avoid issues on load
     from zlm.utils.metrics import jaccard_similarity, overlap_coefficient, cosine_similarity
     score = (
         jaccard_similarity(text1, text2) * 0.4
@@ -48,6 +60,34 @@ def remove_directory(path):
     if os.path.exists(path):
         shutil.rmtree(path)
 
+def interview_system_prompt():
+    return """You are a helpful interviewer and career coach. 
+You know the job description and the company's needs. 
+You will:
+1. Ask the candidate one interview question at a time.
+2. After the candidate responds, provide constructive feedback and coaching tips on their answer.
+3. Then ask the next question.
+Keep the conversation professional, helpful, and structured.
+"""
+
+def generate_interview_turn(user_message, job_description):
+    messages = [{"role": "system", "content": interview_system_prompt()}]
+
+    if job_description:
+        messages.append({"role": "system", "content": f"Job Description:\n{job_description}"})
+
+    messages.extend(st.session_state.interview_history)
+    messages.append({"role": "user", "content": user_message})
+
+    response = client.chat.completions.create(
+        model=AZURE_OPENAI_DEPLOYMENT_NAME,
+        messages=messages,
+        temperature=0.7,
+        max_tokens=500
+    )
+
+    return response.choices[0].message.content.strip()
+
 # --- Initialize Session State ---
 if 'applications' not in st.session_state:
     st.session_state.applications = []
@@ -77,40 +117,6 @@ st.set_page_config(
     layout="wide",
 )
 
-client = AzureOpenAI(
-    azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
-    api_version="2023-03-15-preview",
-    api_key=st.secrets["AZURE_OPENAI_API_KEY"]
-)
-
-AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
-
-def interview_system_prompt():
-    return """You are a helpful interviewer and career coach. 
-You know the job description and the company's needs. 
-You will:
-1. Ask the candidate one interview question at a time.
-2. After the candidate responds, provide constructive feedback and coaching tips on their answer.
-3. Then ask the next question.
-Keep the conversation professional, helpful, and structured.
-"""
-
-def generate_interview_turn(user_message, job_description):
-    messages = [{"role": "system", "content": interview_system_prompt()}]
-    if job_description:
-        messages.append({"role": "system", "content": f"Job Description:\n{job_description}"})
-    messages.extend(st.session_state.interview_history)
-    messages.append({"role": "user", "content": user_message})
-
-    response = client.chat.completions.create(
-        model=AZURE_OPENAI_DEPLOYMENT_NAME,
-        messages=messages,
-        temperature=0.7,
-        max_tokens=500
-    )
-
-    return response.choices[0].message.content.strip()
-
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox(
     "Choose the app mode",
@@ -118,10 +124,11 @@ app_mode = st.sidebar.selectbox(
 )
 
 if app_mode == "Resume & Cover Letter Generator":
-    # Import here to avoid concurrency issues at startup
+    # Import here to avoid potential issues at startup
     from zlm import AutoApplyModel
     from zlm.utils.utils import display_pdf, read_file
 
+    # Clean output directory
     remove_directory("output")
 
     st.header("AI Resume & Cover Letter Generator", divider="rainbow")
@@ -152,7 +159,7 @@ if app_mode == "Resume & Cover Letter Generator":
         download_path = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(download_path, exist_ok=True)
 
-        # Copy templates BEFORE calling resume_builder or cover_letter_generator
+        # Copy templates BEFORE generating PDFs
         shutil.copy("templates/resume.cls", download_path)
         shutil.copy("templates/resume.tex.jinja", download_path)
 
@@ -196,7 +203,7 @@ if app_mode == "Resume & Cover Letter Generator":
                 )
                 st.write("Resume generated at:", resume_path)
                 if not os.path.exists(resume_path):
-                    st.error("Resume PDF not generated.")
+                    st.error("Resume PDF not generated. Check LaTeX logs if accessible.")
                 else:
                     new_score = calculate_ats_score(
                         json.dumps(resume_details), json.dumps(job_details)
@@ -259,7 +266,6 @@ if app_mode == "Resume & Cover Letter Generator":
             resume_info = st.session_state.generated_resume
             st.write(f"**Resume:** {resume_info['filename']}")
             if resume_info['path'] and os.path.exists(resume_info['path']):
-                from zlm.utils.utils import read_file, display_pdf
                 pdf_data = read_file(resume_info['path'], "rb")
                 st.download_button(
                     "Download Resume ⬇",
@@ -275,7 +281,6 @@ if app_mode == "Resume & Cover Letter Generator":
             cover_letter_info = st.session_state.generated_cover_letter
             st.write(f"**Cover Letter:** {cover_letter_info['filename']}")
             if cover_letter_info['path'] and os.path.exists(cover_letter_info['path']):
-                from zlm.utils.utils import read_file
                 cv_data = read_file(cover_letter_info['path'], "rb")
                 st.download_button(
                     "Download Cover Letter ⬇",
@@ -329,7 +334,7 @@ if app_mode == "Resume & Cover Letter Generator":
         st.info("No applications tracked yet. Generate a resume or cover letter to start tracking.")
 
 elif app_mode == "Interview Preparation":
-    # Import only when needed
+    # Only import these here
     from zlm.utils.utils import read_file, display_pdf
 
     st.header("AI Interview Preparation", divider="rainbow")
@@ -361,8 +366,6 @@ elif app_mode == "Interview Preparation":
                 system_prompt = "You are a technical interviewer generating technical interview questions."
             elif interview_type == "Behavioral Round":
                 system_prompt = "You are a behavioral specialist generating behavioral interview questions."
-            else:
-                system_prompt = "You are a helpful assistant generating interview questions."
 
             try:
                 response = client.chat.completions.create(
@@ -428,4 +431,3 @@ try:
 except Exception as e:
     st.error(f"An unexpected error occurred: {e}")
     st.stop()
-
