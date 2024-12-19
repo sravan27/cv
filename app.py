@@ -57,7 +57,7 @@ def generate_filename(name, company, position, doc_type):
     return f"{safe_name}_{safe_company}_{safe_position}_{doc_type}_{timestamp}.json"
 
 def interview_system_prompt(user_data, job_details):
-    return f"You are a professional interviewer and career coach with deep knowledge of the company's needs and the candidate's background. Context: Job Description: {json.dumps(job_details, indent=2)} Candidate Resume Data: {json.dumps(user_data, indent=2)} Your Role: 1. Ask one challenging, context-specific interview question at a time. 2. After the candidate responds, provide constructive, personalized feedback focusing on areas to improve, and highlight strengths. 3. Coach the candidate by referencing both the job needs and their experience. 4. Then ask the next question, diving deeper each time, ensuring the candidate is truly prepared and tested on relevant skills. Be professional, encouraging, yet challenging. Make the candidate truly prepared for the role at {job_details.get('company_name','the company')}."
+    return f"You are a professional interviewer and career coach with deep knowledge of the company's needs and the candidate's background. Context: Job Description: {json.dumps(job_details, indent=2)} Candidate Resume Data: {json.dumps(user_data, indent=2)} Your Role: 1. Ask one challenging, context-specific interview question at a time. 2. After the candidate responds, provide constructive, personalized feedback focusing on areas to improve, and highlight strengths. 3. Coach the candidate by referencing both the job needs and their experience. 4. Then ask the next question, diving deeper each time. Be professional, encouraging, yet challenging."
 
 def generate_interview_turn(user_message, job_description, user_data, job_details):
     messages = [{"role": "system", "content": interview_system_prompt(user_data, job_details)}]
@@ -175,7 +175,6 @@ elif app_mode == "Interview Preparation":
             st.text_area("Suggested Interview Questions:", value=interview_questions, height=200)
     st.markdown("---")
     st.subheader("Interactive Interview & Coaching Session")
-    st.write("Click 'Start Interview' to begin a Q&A session.")
     start_interview = st.button("Start Interview", disabled=st.session_state.interview_active or not (st.session_state.job_details and st.session_state.user_data))
     if start_interview:
         st.session_state.interview_history = []
@@ -206,12 +205,11 @@ elif app_mode == "Upcoming Features":
     - Advanced Provider Management
     - Batch Applications
     """)
-    st.write("PDF generation is not shown due to environment restrictions. Once dependencies are available, we'll provide downloadable, fully polished resumes.")
+    st.write("PDF generation is not shown due to environment restrictions. Once dependencies are available, we'll provide downloadable resumes.")
     st.subheader("Preview of Multimodal Integration")
-    st.write("Upload images or assets (not integrated yet):")
     multimodal_file = st.file_uploader("Upload an asset:", type=["png", "jpg", "jpeg"])
     if multimodal_file:
-        st.warning("This feature is under development. The uploaded file won't affect current ATS scoring or interview prep yet.")
+        st.warning("Not integrated yet.")
 
 st.markdown("<hr style='border:1px solid #ddd' />", unsafe_allow_html=True)
 st.caption("Built on top of zlm by hireopt and team.")
